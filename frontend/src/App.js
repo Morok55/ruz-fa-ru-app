@@ -1,0 +1,309 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import AppShell from "./components/AppShell.js";
+import WeekStrip from "./components/WeekStrip.js";
+import Sections from "./components/Sections.js";
+import DaySection from "./components/DaySection.js";
+
+const API_BASE = "http://localhost:8000/api";
+
+/* ===== helpers ===== */
+const pad = (n) => String(n).padStart(2, "0");
+const fmtRuz = (d) => `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+const daysRuShort = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+
+function startOfWeek(date) {
+    const d = new Date(date);
+    const shift = (d.getDay() + 6) % 7; // 0=Mon
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - shift);
+    return d;
+}
+function addDays(date, n) {
+    const d = new Date(date);
+    d.setDate(d.getDate() + n);
+    return d;
+}
+function parseRuzDate(s) {
+    if (!s) return null;
+    const parts = s.split(".");
+    if (parts.length === 3) {
+        if (parts[0].length === 4) {
+            return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        } else {
+            return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+        }
+    }
+    const t = Date.parse(s);
+    return Number.isNaN(t) ? null : new Date(t);
+}
+function isoKey(d) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+}
+function weekKeyOf(date) {
+    const w = startOfWeek(date);
+    return w.toISOString().slice(0, 10); // ISO Пн этой недели
+}
+
+function mergeDayLessons(arr) {
+    const byKey = new Map();
+    for (const l of arr) {
+        const kind = (l.kindOfWork || l.lessonType || "").trim();
+        const key =
+            `${(l.discipline || "").trim()}|${kind}|${(l.beginLesson || "").trim()}|${(l.endLesson || "").trim()}`;
+
+        if (!byKey.has(key)) {
+            byKey.set(key, {
+                ...l,
+                _lines: [],      // сюда соберём «Преподаватель — Корпус/Аудитория»
+                _originals: []   // если нужно будет отладить
+            });
+        }
+        const item = byKey.get(key);
+        const teacher = (l.lecturer || l.lecturer_name || "").trim();
+        const building = (l.building || "").trim();
+        const room = (l.auditorium || l.room || "").trim();
+        const where = [building, room].filter(Boolean).join("/");
+
+        const line = [teacher, where].filter(Boolean).join(" — ");
+        if (line && !item._lines.includes(line)) item._lines.push(line);
+
+        item._originals.push(l);
+    }
+
+    // сортируем по времени и пронумеровываем пары
+    const merged = Array.from(byKey.values()).sort(
+        (a, b) => (toHHMM(a.beginLesson)).localeCompare(toHHMM(b.beginLesson))
+    );
+
+    return merged.map((l, i) => {
+        const no = pairNoByTime(l.beginLesson, l.endLesson);
+        return { ...l, _pairNo: no ?? (i + 1) }; // fallback, если время внезапно «нестандартное»
+    });
+}
+
+function toHHMM(s) {
+    if (!s) return "";
+    const t = String(s).trim().replace(/\./g, ":");
+    const [h = "", m = ""] = t.split(":");
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function pairNoByTime(begin, end) {
+    const b = toHHMM(begin);
+    const e = toHHMM(end);
+    const key = `${b}-${e}`;
+    const map = {
+        "08:30-10:00": 1,
+        "10:10-11:40": 2,
+        "11:50-13:20": 3,
+        "14:00-15:30": 4,
+        "15:40-17:10": 5,
+        "17:20-18:50": 6,
+        "18:55-20:25": 7,
+        "20:30-22:00": 8
+    };
+    return map[key]; // вернёт undefined, если нет в таблице
+}
+
+/* ===== API ===== */
+async function fetchJSON(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${url} → HTTP ${r.status}`);
+    return r.json();
+}
+
+export default function App() {
+    const [term, setTerm] = useState("ТРПО24-1");
+    const [status, setStatus] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [byDate, setByDate] = useState({});        // { "YYYY-MM-DD": Lesson[] }
+    const [label, setLabel] = useState("");
+
+    const [anchorDate, setAnchorDate] = useState(startOfWeek(new Date())); // понедельник отображаемой недели
+    const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(anchorDate, i)), [anchorDate]);
+
+    // показываем один день (сегодня) по умолчанию
+    const [selectedDate, setSelectedDate] = useState(new Date());
+
+    // ------ КЭШИ (память вкладки) ------
+    const groupCacheRef = useRef(new Map());  // term -> { id, label }
+    const weekCacheRef = useRef(new Map());   // cacheKey -> { byDate, fetchedAt }
+    // cacheKey = `${groupId}::${weekKeyOf(anyDateInWeek)}`
+
+    async function resolveGroupCached(termStr) {
+        const hit = groupCacheRef.current.get(termStr);
+        if (hit) return hit;
+        const options = await fetchJSON(`${API_BASE}/search?term=${encodeURIComponent(termStr)}`);
+        const group = options.find((v) => /group/i.test(v.type || v.kind || v.category || "") || v.group);
+        if (!group) throw new Error("Группа не найдена");
+        const id = group.id ?? group.groupOid ?? group.oid;
+        const lbl = group.label || group.text || termStr;
+        const val = { id, label: lbl };
+        groupCacheRef.current.set(termStr, val);
+        return val;
+    }
+
+    async function loadWeekCached({ force = false, weekStartDate = anchorDate } = {}) {
+        setLoading(true);
+        setStatus("Ищу группу…");
+        try {
+            const { id, label: lbl } = await resolveGroupCached(term);
+            setLabel(lbl);
+
+            const wkKey = weekKeyOf(weekStartDate);
+            const cacheKey = `${id}::${wkKey}`;
+            if (!force && weekCacheRef.current.has(cacheKey)) {
+                const cached = weekCacheRef.current.get(cacheKey);
+                setByDate(cached.byDate);
+                setStatus("");
+                return { id, cacheKey };
+            }
+
+            setStatus(`Загружаю неделю…`);
+            const start = fmtRuz(weekStartDate);
+            const finish = fmtRuz(addDays(weekStartDate, 6));
+            const lessons = await fetchJSON(
+                `${API_BASE}/schedule/group/${id}?start=${start}&finish=${finish}&lng=1`
+            );
+
+            const tmp = {};
+            for (const l of lessons) {
+                const d = parseRuzDate(l.date);
+                if (!d) continue;
+                const key = isoKey(d);
+                if (!tmp[key]) tmp[key] = [];
+                tmp[key].push(l);
+            }
+            Object.keys(tmp).forEach((k) => {
+                tmp[k] = mergeDayLessons(tmp[k]);
+            });
+
+            weekCacheRef.current.set(cacheKey, { byDate: tmp, fetchedAt: Date.now() });
+            setByDate(tmp);
+            setStatus("");
+            return { id, cacheKey };
+        } catch (e) {
+            console.error(e);
+            setStatus("Ошибка: " + e.message);
+            throw e;
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function showDay(dateObj) {
+        setSelectedDate(dateObj);
+        try {
+            const { id } = await loadWeekCached({ weekStartDate: startOfWeek(dateObj) });
+            const wkKey = weekKeyOf(dateObj);
+            const cacheKey = `${id}::${wkKey}`;
+            const bucket = weekCacheRef.current.get(cacheKey);
+            if (bucket) setByDate(bucket.byDate);
+        } catch {
+            /* статус уже выставлен */
+        }
+    }
+
+    async function goPrevWeek() {
+        const prev = addDays(anchorDate, -7);
+        setAnchorDate(prev);
+        setSelectedDate(prev); // показываем понедельник той недели
+        await loadWeekCached({ weekStartDate: prev });
+    }
+
+    async function goNextWeek() {
+        const next = addDays(anchorDate, 7);
+        setAnchorDate(next);
+        setSelectedDate(next);
+        await loadWeekCached({ weekStartDate: next });
+    }
+
+    useEffect(() => {
+        const el = document.querySelector(".week-strip");
+        if (!el) return;
+
+        const touch = { x: 0, y: 0, t: 0, active: false };
+        const onStart = (e) => {
+            const t = e.touches[0];
+            touch.x = t.clientX;
+            touch.y = t.clientY;
+            touch.t = Date.now();
+            touch.active = true;
+        };
+        const onEnd = (e) => {
+            if (!touch.active) return;
+            const t = e.changedTouches[0];
+            const dx = t.clientX - touch.x;
+            const dy = t.clientY - touch.y;
+            const dt = Date.now() - touch.t;
+            touch.active = false;
+
+            const THRESHOLD = 40;   // px
+            const MAX_ANGLE = 0.6;  // |dy/dx|
+            if (Math.abs(dx) > THRESHOLD && Math.abs(dy) / Math.abs(dx) < MAX_ANGLE && dt < 600) {
+                if (dx < 0) { goNextWeek(); } else { goPrevWeek(); }
+            }
+        };
+
+        el.addEventListener("touchstart", onStart, { passive: true });
+        el.addEventListener("touchend", onEnd, { passive: true });
+        return () => {
+            el.removeEventListener("touchstart", onStart);
+            el.removeEventListener("touchend", onEnd);
+        };
+    }, [anchorDate]); // при смене недели перевешиваем
+
+    useEffect(() => {
+        (async () => {
+            await loadWeekCached({ weekStartDate: anchorDate });
+            setSelectedDate(new Date()); // показываем сегодня
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // ---------- РЕНДЕР ----------
+    const header = (
+        <header className="header">
+            <div className="header-title">Расписание</div>
+            <form
+                className="group-form"
+                onSubmit={async (e) => {
+                    e.preventDefault();
+                    await loadWeekCached({ force: true });
+                    setSelectedDate(new Date());
+                }}
+            >
+                <input
+                    className="input"
+                    placeholder="Группа (например: ТРПО24-1)"
+                    value={term}
+                    onChange={(e) => setTerm(e.target.value)}
+                />
+                <button className="button" disabled={loading}>
+                    {loading ? "Загрузка…" : "Обновить"}
+                </button>
+            </form>
+
+            <WeekStrip
+                weekDays={weekDays}
+                selectedDate={selectedDate}
+                onSelectDay={showDay}
+                dayLabels={daysRuShort}
+            />
+        </header>
+    );
+
+    const datesToRender = [selectedDate];
+
+    return (
+        <AppShell header={header}>
+            <Sections>
+                {datesToRender.map((d) => {
+                    const key = isoKey(d);
+                    const lessons = byDate[key] || [];
+                    return <DaySection key={key} date={d} lessons={lessons} />;
+                })}
+            </Sections>
+        </AppShell>
+    );
+}

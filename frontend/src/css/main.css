@@ -1,0 +1,204 @@
+:root {
+    --bg: #121212;
+    --card: #191919;
+    --muted: #a0a7b4;
+    --text: #e8eaed;
+    --accent: #3b82f6;
+    --dot: #5fa8ff;
+    --divider: #1e1e1e;
+    --radius: 16px;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+    margin: 0;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
+}
+
+.app {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 16px;
+    height: 100vh;          /* контейнер на полный экран */
+    display: flex;
+    flex-direction: column; /* сверху вниз */
+    min-height: 0;          /* важно для корректного расчёта flex-детей */
+}
+
+/* верхняя панель просто статична (не sticky) */
+.topbar {
+    background: var(--bg);
+    padding: 20px 0 10px;
+    flex: 0 0 auto;
+}
+
+/* Заголовок */
+.header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-top: 5vh;
+}
+.header-title {
+    font-size: 22px;
+    letter-spacing: 0.4px;
+    text-align: center;
+}
+
+/* Поле группы */
+.group-form {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    justify-content: center;
+    margin-bottom: 10px;
+}
+.input {
+    background: var(--card);
+    border: 1px solid var(--divider);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 12px;
+    outline: none;
+    min-width: 240px;
+}
+.button {
+    background: #191919;
+    border: 1px solid var(--divider);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 12px;
+    cursor: pointer;
+}
+.button:disabled { opacity: 0.6; cursor: default; }
+
+/* Лента дней недели */
+.week-strip {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    margin: 6px 0 0;
+    width: 100%;
+    touch-action: pan-y;   /* разрешаем вертикальные жесты странице, а горизонтальные ловим в JS */
+}
+
+/* Кнопка дня */
+.day-pill {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+
+    height: 56px;                 /* явная высота */
+    padding: 0;                   /* сброс браузерных отступов */
+    border-radius: 12px;
+    background: #191919;
+    border: 1px solid var(--divider);
+
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.1;             /* стабильная высота строки */
+    text-transform: uppercase;
+
+    cursor: pointer;
+    user-select: none;
+    appearance: none;             /* убрать системный стиль кнопки */
+    -webkit-appearance: none;
+}
+
+.day-pill .num {
+    display: block;
+    margin-top: 4px;
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1;
+}
+
+.day-pill.today { border-color: #2a3340; }
+.day-pill.active { outline: 2px solid var(--accent); }
+
+/* СКРОЛЛ ИМЕННО ЗДЕСЬ */
+.sections {
+    flex: 1 1 auto;         /* занимает всё оставшееся пространство */
+    min-height: 0;          /* обязательно, иначе не будет скролла */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* scroll-snap-type: y mandatory;
+    scroll-behavior: smooth; */
+    margin-top: 16px;
+    /* спрятать скроллбар */
+    scrollbar-width: none;      /* Firefox */
+    -ms-overflow-style: none;   /* IE/Edge */
+}
+
+.sections::-webkit-scrollbar {
+    display: none;              /* Chrome, Safari, Opera */
+}
+
+/* Каждая секция-день прилипает к началу своего скролл-контейнера */
+.day-section {
+    scroll-snap-align: start;
+    min-height: 100%;
+}
+
+/* Заголовок даты */
+.date-title {
+    margin: 0 0 16px;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+/* Карточка пары */
+.card {
+    background: var(--card);
+    border: 1px solid var(--divider);
+    border-radius: 18px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 0 rgba(0,0,0,.25);
+}
+.badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+}
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--dot);
+}
+.subject {
+    margin: 8px 0 6px;
+    font-size: 18px;
+    font-weight: 650;
+    line-height: 1.25;
+}
+.subline {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.3;
+}
+.time {
+    margin-top: 4px;
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 20px;
+}
+.divider {
+    height: 1px;
+    background: var(--divider);
+    margin: 20px 0 8px;
+}
+
+/* Статусы */
+.status { color: var(--muted); margin: 0 0 10px; }
