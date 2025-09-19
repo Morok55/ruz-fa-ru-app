@@ -4,7 +4,7 @@ import WeekStrip from "./components/WeekStrip.jsx";
 import Sections from "./components/Sections.jsx";
 import DaySection from "./components/DaySection.jsx";
 
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
 /* ===== helpers ===== */
 const pad = (n) => String(n).padStart(2, "0");

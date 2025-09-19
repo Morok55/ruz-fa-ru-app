@@ -3,6 +3,7 @@ services:
     name: ruz-fa-ru-app
     env: python
     buildCommand: |
-      cd frontend && npm install && npm run build
+      pip install -r requirements.txt
+      cd frontend && npm ci && npm run build
     startCommand: |
-      cd backend && gunicorn app:app
+      gunicorn backend.app:app
