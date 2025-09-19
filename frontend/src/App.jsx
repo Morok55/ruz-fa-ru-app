@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import AppShell from "./components/AppShell.js";
-import WeekStrip from "./components/WeekStrip.js";
-import Sections from "./components/Sections.js";
-import DaySection from "./components/DaySection.js";
+import AppShell from "./components/AppShell.jsx";
+import WeekStrip from "./components/WeekStrip.jsx";
+import Sections from "./components/Sections.jsx";
+import DaySection from "./components/DaySection.jsx";
 
 const API_BASE = "http://localhost:8000/api";
 
