@@ -119,7 +119,7 @@ async function fetchJSON(url) {
 }
 
 export default function App() {
-    const [term, setTerm] = useState("ТРПО24-1");
+    const [term, setTerm] = useState(() => localStorage.getItem("lastGroup") || "");
     const [status, setStatus] = useState("");
     const [loading, setLoading] = useState(false);
     const [byDate, setByDate] = useState({});        // { "YYYY-MM-DD": Lesson[] }
@@ -198,19 +198,15 @@ export default function App() {
     }
 
     async function showDay(dateObj) {
+        if (!term) return;
         setSelectedDate(dateObj);
         try {
-            const { id } = await loadWeekCached({ weekStartDate: startOfWeek(dateObj) });
-            const wkKey = weekKeyOf(dateObj);
-            const cacheKey = `${id}::${wkKey}`;
-            const bucket = weekCacheRef.current.get(cacheKey);
-            if (bucket) setByDate(bucket.byDate);
-        } catch {
-            /* статус уже выставлен */
-        }
+            await loadWeekCached({ weekStartDate: startOfWeek(dateObj) });
+        } catch {}
     }
 
     async function goPrevWeek() {
+        if (!term) return;
         const prevStart = addDays(anchorDate, -7);
         setAnchorDate(prevStart);
         setSelectedDate(prev => sameWeekdayInWeek(prevStart, prev));
@@ -218,6 +214,7 @@ export default function App() {
     }
 
     async function goNextWeek() {
+        if (!term) return;
         const nextStart = addDays(anchorDate, 7);
         setAnchorDate(nextStart);
         setSelectedDate(prev => sameWeekdayInWeek(nextStart, prev));
@@ -225,12 +222,13 @@ export default function App() {
     }
 
     useEffect(() => {
+        if (!term) return;
         (async () => {
             await loadWeekCached({ weekStartDate: anchorDate });
-            // setSelectedDate(new Date()); // показываем сегодня
+            setSelectedDate(new Date());
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [term]);
 
     // ---------- РЕНДЕР ----------
     const header = (
@@ -240,13 +238,15 @@ export default function App() {
                 className="group-form"
                 onSubmit={async (e) => {
                     e.preventDefault();
-                    await loadWeekCached({ force: true });
+                    if (!term) return;
+                    await loadWeekCached({ force: true, weekStartDate: anchorDate });
+                    localStorage.setItem("lastGroup", term);
                     setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
                 }}
             >
                 <input
                     className="input"
-                    placeholder="Группа (например: ТРПО24-1)"
+                    placeholder="Группа"
                     value={term}
                     onChange={(e) => setTerm(e.target.value)}
                 />
