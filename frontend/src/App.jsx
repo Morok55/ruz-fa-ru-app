@@ -48,36 +48,37 @@ function mergeDayLessons(arr) {
     const byKey = new Map();
     for (const l of arr) {
         const kind = (l.kindOfWork || l.lessonType || "").trim();
-        const key =
-            `${(l.discipline || "").trim()}|${kind}|${(l.beginLesson || "").trim()}|${(l.endLesson || "").trim()}`;
+        const key = `${(l.discipline || "").trim()}|${kind}|${(l.beginLesson || "").trim()}|${(l.endLesson || "").trim()}`;
 
         if (!byKey.has(key)) {
             byKey.set(key, {
                 ...l,
-                _lines: [],      // сюда соберём «Преподаватель — Корпус/Аудитория»
-                _originals: []   // если нужно будет отладить
+                _lines: [],        // массив объектов { teacher, room }
+                _isForeign: /иностран/i.test(l.discipline || ""), // флаг «иностр. язык»
+                _originals: []
             });
         }
         const item = byKey.get(key);
-        const teacher = (l.lecturer || l.lecturer_name || "").trim();
-        const building = (l.building || "").trim();
-        const room = (l.auditorium || l.room || "").trim();
-        const where = [building, room].filter(Boolean).join("/");
 
-        const line = [teacher, where].filter(Boolean).join(" — ");
-        if (line && !item._lines.includes(line)) item._lines.push(line);
+        const teacher = (l.lecturer || l.lecturer_name || "").trim();
+        const room = (l.auditorium || l.room || "").trim();
+
+        // добавляем уникальные комбинации teacher+room
+        if (teacher || room) {
+            const exists = item._lines.some(x => x.teacher === teacher && x.room === room);
+            if (!exists) item._lines.push({ teacher, room });
+        }
 
         item._originals.push(l);
     }
 
-    // сортируем по времени и пронумеровываем пары
     const merged = Array.from(byKey.values()).sort(
         (a, b) => (toHHMM(a.beginLesson)).localeCompare(toHHMM(b.beginLesson))
     );
 
     return merged.map((l, i) => {
         const no = pairNoByTime(l.beginLesson, l.endLesson);
-        return { ...l, _pairNo: no ?? (i + 1) }; // fallback, если время внезапно «нестандартное»
+        return { ...l, _pairNo: no ?? (i + 1) };
     });
 }
 
@@ -105,6 +106,11 @@ function pairNoByTime(begin, end) {
     return map[key]; // вернёт undefined, если нет в таблице
 }
 
+function sameWeekdayInWeek(weekStart, dateToKeep) {
+    const idx = (dateToKeep.getDay() + 6) % 7; // 0=пн … 6=вс
+    return addDays(weekStart, idx);
+}
+
 /* ===== API ===== */
 async function fetchJSON(url) {
     const r = await fetch(url);
@@ -128,7 +134,6 @@ export default function App() {
     // ------ КЭШИ (память вкладки) ------
     const groupCacheRef = useRef(new Map());  // term -> { id, label }
     const weekCacheRef = useRef(new Map());   // cacheKey -> { byDate, fetchedAt }
-    // cacheKey = `${groupId}::${weekKeyOf(anyDateInWeek)}`
 
     async function resolveGroupCached(termStr) {
         const hit = groupCacheRef.current.get(termStr);
@@ -165,6 +170,7 @@ export default function App() {
             const lessons = await fetchJSON(
                 `${API_BASE}/schedule/group/${id}?start=${start}&finish=${finish}&lng=1`
             );
+            console.log(lessons)  // УДАЛИТЬ
 
             const tmp = {};
             for (const l of lessons) {
@@ -205,58 +211,23 @@ export default function App() {
     }
 
     async function goPrevWeek() {
-        const prev = addDays(anchorDate, -7);
-        setAnchorDate(prev);
-        setSelectedDate(prev); // показываем понедельник той недели
-        await loadWeekCached({ weekStartDate: prev });
+        const prevStart = addDays(anchorDate, -7);
+        setAnchorDate(prevStart);
+        setSelectedDate(prev => sameWeekdayInWeek(prevStart, prev));
+        await loadWeekCached({ weekStartDate: prevStart });
     }
 
     async function goNextWeek() {
-        const next = addDays(anchorDate, 7);
-        setAnchorDate(next);
-        setSelectedDate(next);
-        await loadWeekCached({ weekStartDate: next });
+        const nextStart = addDays(anchorDate, 7);
+        setAnchorDate(nextStart);
+        setSelectedDate(prev => sameWeekdayInWeek(nextStart, prev));
+        await loadWeekCached({ weekStartDate: nextStart });
     }
-
-    useEffect(() => {
-        const el = document.querySelector(".week-strip");
-        if (!el) return;
-
-        const touch = { x: 0, y: 0, t: 0, active: false };
-        const onStart = (e) => {
-            const t = e.touches[0];
-            touch.x = t.clientX;
-            touch.y = t.clientY;
-            touch.t = Date.now();
-            touch.active = true;
-        };
-        const onEnd = (e) => {
-            if (!touch.active) return;
-            const t = e.changedTouches[0];
-            const dx = t.clientX - touch.x;
-            const dy = t.clientY - touch.y;
-            const dt = Date.now() - touch.t;
-            touch.active = false;
-
-            const THRESHOLD = 40;   // px
-            const MAX_ANGLE = 0.6;  // |dy/dx|
-            if (Math.abs(dx) > THRESHOLD && Math.abs(dy) / Math.abs(dx) < MAX_ANGLE && dt < 600) {
-                if (dx < 0) { goNextWeek(); } else { goPrevWeek(); }
-            }
-        };
-
-        el.addEventListener("touchstart", onStart, { passive: true });
-        el.addEventListener("touchend", onEnd, { passive: true });
-        return () => {
-            el.removeEventListener("touchstart", onStart);
-            el.removeEventListener("touchend", onEnd);
-        };
-    }, [anchorDate]); // при смене недели перевешиваем
 
     useEffect(() => {
         (async () => {
             await loadWeekCached({ weekStartDate: anchorDate });
-            setSelectedDate(new Date()); // показываем сегодня
+            // setSelectedDate(new Date()); // показываем сегодня
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -270,7 +241,7 @@ export default function App() {
                 onSubmit={async (e) => {
                     e.preventDefault();
                     await loadWeekCached({ force: true });
-                    setSelectedDate(new Date());
+                    setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
                 }}
             >
                 <input
@@ -289,6 +260,8 @@ export default function App() {
                 selectedDate={selectedDate}
                 onSelectDay={showDay}
                 dayLabels={daysRuShort}
+                onPrevWeek={goPrevWeek}
+                onNextWeek={goNextWeek}
             />
         </header>
     );

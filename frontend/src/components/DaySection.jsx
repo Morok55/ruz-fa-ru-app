@@ -20,41 +20,69 @@ export default function DaySection({ date, lessons }) {
             {!lessons || lessons.length === 0 ? (
                 <div className="status">Нет занятий</div>
             ) : (
-                lessons.map((l, idx) => (
-                    <article key={idx} className="card">
-                        <div className="badge">
-                            <span className="dot" />
-                            <span>{toPairUpper(l.kindOfWork || l.lessonType || "Занятие")}</span>
-                            <span>•</span>
-                            {/* ВАЖНО: число пары берём из _pairNo, которое уже вычислено в App.js по времени */}
-                            <span>{l._pairNo ?? (idx + 1)} пара</span>
-                        </div>
+                lessons.map((l, idx) => {
+                    // 1) нормализуем тип занятия: «Практические (семинарские) занятия» -> СЕМИНАР
+                    const kindRaw = l.kindOfWork || l.lessonType || "Занятие";
+                    const lower = String(kindRaw).toLowerCase();
+                    const kindLabel = (lower.includes("практичес") && lower.includes("семинар"))
+                        ? "СЕМИНАР"
+                        : toPairUpper(kindRaw);
 
-                        <div className="subject">{l.discipline || "Дисциплина"}</div>
+                    // 2) определяем foreign-флаг на случай, если не пришёл из merge
+                    const isForeign = l._isForeign ?? /иностран/i.test(l.discipline || "");
 
-                        {/* Если есть склеенные строки с преподами/аудиториями — выводим их списком */}
-                        {Array.isArray(l._lines) && l._lines.length > 0 ? (
-                            l._lines.map((line, i2) => (
-                                <div key={i2} className="subline">{line}</div>
-                            ))
-                        ) : (
-                            <>
-                                <div className="subline">{(l.lecturer || l.lecturer_name || "").trim()}</div>
-                                <div className="subline">
-                                    {[(l.building || "").trim(), (l.auditorium || l.room || "").trim()]
-                                        .filter(Boolean)
-                                        .join("/")}
-                                </div>
-                            </>
-                        )}
+                    return (
+                        <article key={idx} className="card">
+                            <div className="badge">
+                                <span className="dot" />
+                                <span>{kindLabel}</span>
+                                <span>•</span>
+                                <span>{l._pairNo ?? (idx + 1)} пара</span>
+                            </div>
 
-                        <div className="time">
-                            {[(l.beginLesson || "").trim(), (l.endLesson || "").trim()]
-                                .filter(Boolean)
-                                .join(" – ")}
-                        </div>
-                    </article>
-                ))
+                            <div className="subject">{l.discipline || "Дисциплина"}</div>
+
+                            {/* 3) вывод строк: для «Иностранного» — teacher — room, иначе на разных строках */}
+                            {Array.isArray(l._lines) && l._lines.length > 0 ? (
+                                isForeign ? (
+                                    l._lines.map(({ teacher, room }, i2) => (
+                                        <div key={i2} className="subline">
+                                            {[teacher, room].filter(Boolean).join(" — ")}
+                                        </div>
+                                    ))
+                                ) : (
+                                    l._lines.map(({ teacher, room }, i2) => (
+                                        <React.Fragment key={i2}>
+                                            {teacher ? <div className="subline">{teacher}</div> : null}
+                                            {room ? <div className="subline">{room}</div> : null}
+                                        </React.Fragment>
+                                    ))
+                                )
+                            ) : (
+                                // fallback, если _lines нет
+                                isForeign ? (
+                                    <div className="subline">
+                                        {[
+                                            (l.lecturer || l.lecturer_name || "").trim(),
+                                            (l.auditorium || l.room || "").trim()
+                                        ].filter(Boolean).join(" — ")}
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="subline">{(l.lecturer || l.lecturer_name || "").trim()}</div>
+                                        <div className="subline">{(l.auditorium || l.room || "").trim()}</div>
+                                    </>
+                                )
+                            )}
+
+                            <div className="time">
+                                {[(l.beginLesson || "").trim(), (l.endLesson || "").trim()]
+                                    .filter(Boolean)
+                                    .join(" – ")}
+                            </div>
+                        </article>
+                    );
+                })
             )}
         </section>
     );
