@@ -9,5 +9,16 @@
     <body>
         <div id="root"></div>
         <script type="module" src="/src/main.jsx"></script>
+        <script>
+            if (window.Telegram && window?.Telegram?.WebApp) {
+                var app = window.Telegram.WebApp;
+                app.ready();
+                app.expand();
+                // app.isClosingConfirmationEnabled = true;
+                app.isVerticalSwipesEnabled = false;
+                app.disableVerticalSwipes();
+                app.requestFullscreen();
+            }
+        </script>
     </body>
 </html>
