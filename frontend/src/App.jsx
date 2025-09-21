@@ -49,6 +49,19 @@ function weekKeyOf(date) {
     return isoKey(w);
 }
 
+// --- SWR (stale-while-revalidate) ---
+const SWR_STALE  = 1000 * 60 * 5;   // 5 минут — мягкий TTL
+const SWR_EXPIRE = 1000 * 60 * 60;  // 60 минут — жёсткий TTL
+
+function lsSet(key, value) {
+    localStorage.setItem(key, JSON.stringify({ t: Date.now(), v: value }));
+}
+function lsPeek(key) {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch { return null; }
+}
+
 function mergeDayLessons(arr) {
     const byKey = new Map();
     for (const l of arr) {
@@ -123,6 +136,22 @@ async function fetchJSON(url) {
     return r.json();
 }
 
+async function fetchWeekFromApi(id, weekStartDate) {
+    const start = fmtRuz(weekStartDate);
+    const finish = fmtRuz(addDays(weekStartDate, 6));
+    const lessons = await fetchJSON(`${API_BASE}/schedule/group/${id}?start=${start}&finish=${finish}&lng=1`);
+
+    const tmp = {};
+    for (const l of lessons) {
+        const d = parseRuzDate(l.date);
+        if (!d) continue;
+        const key = isoKey(d);
+        (tmp[key] ||= []).push(l);
+    }
+    Object.keys(tmp).forEach((k) => (tmp[k] = mergeDayLessons(tmp[k])));
+    return { byDate: tmp, fetchedAt: Date.now() };
+}
+
 export default function App() {
     const [term, setTerm] = useState(() => localStorage.getItem("lastGroup") || "");
     const [status, setStatus] = useState("");
@@ -142,6 +171,8 @@ export default function App() {
 
     const weekSwiperRef = useRef(null);
 
+    const inflightRef = useRef(new Map()); // cacheKey -> Promise
+
     async function resolveGroupCached(termStr) {
         const hit = groupCacheRef.current.get(termStr);
         if (hit) return hit;
@@ -156,52 +187,101 @@ export default function App() {
     }
 
     async function loadWeekCached({ force = false, weekStartDate = anchorDate } = {}) {
-        setLoading(true);
-        setStatus("Ищу группу…");
-        try {
-            const { id, label: lbl } = await resolveGroupCached(term);
-            setLabel(lbl);
+        // получим id группы (часто из кэша)
+        const { id, label: lbl } = await resolveGroupCached(term);
+        setLabel(lbl);
 
-            const wkKey = weekKeyOf(weekStartDate);
-            const cacheKey = `${id}::${wkKey}`;
-            if (!force && weekCacheRef.current.has(cacheKey)) {
-                const cached = weekCacheRef.current.get(cacheKey);
-                setByDate(cached.byDate);
+        const wkKey = weekKeyOf(weekStartDate);
+        const cacheKey = `${id}::${wkKey}`;
+
+        // --- SWR: сначала пробуем кэш из localStorage ---
+        const pack = lsPeek(cacheKey);
+        if (!force && pack && pack.v?.byDate) {
+            const age = Date.now() - (pack.t || 0);
+
+            if (age <= SWR_EXPIRE) {
+                // Показать мгновенно из LS
+                weekCacheRef.current.set(cacheKey, pack.v);
+                setByDate(pack.v.byDate);
                 setStatus("");
+
+                // Если устарело по мягкому TTL — тихо перезагрузим в фоне
+                if (age > SWR_STALE && !inflightRef.current.has(cacheKey)) {
+                    inflightRef.current.set(cacheKey, (async () => {
+                        try {
+                            const fresh = await fetchWeekFromApi(id, weekStartDate);
+                            weekCacheRef.current.set(cacheKey, fresh);
+                            lsSet(cacheKey, fresh);
+                            // Обновляем экран только если пользователь всё ещё на этой неделе
+                            setByDate(prev =>
+                                weekKeyOf(weekDays[0]) === weekKeyOf(weekStartDate) ? fresh.byDate : prev
+                            );
+                        } catch {
+                            // игнор — это фоновая проверка
+                        } finally {
+                            inflightRef.current.delete(cacheKey);
+                        }
+                    })());
+                }
+                // Уже показали — можно выйти
                 return { id, cacheKey };
             }
+        }
+        // --- конец блока SWR ---
 
-            setStatus(`Загружаю неделю…`);
-            const start = fmtRuz(weekStartDate);
-            const finish = fmtRuz(addDays(weekStartDate, 6));
-            const lessons = await fetchJSON(
-                `${API_BASE}/schedule/group/${id}?start=${start}&finish=${finish}&lng=1`
-            );
-            console.log(lessons)  // УДАЛИТЬ
-
-            const tmp = {};
-            for (const l of lessons) {
-                const d = parseRuzDate(l.date);
-                if (!d) continue;
-                const key = isoKey(d);
-                if (!tmp[key]) tmp[key] = [];
-                tmp[key].push(l);
-            }
-            Object.keys(tmp).forEach((k) => {
-                tmp[k] = mergeDayLessons(tmp[k]);
-            });
-
-            weekCacheRef.current.set(cacheKey, { byDate: tmp, fetchedAt: Date.now() });
-            setByDate(tmp);
+        // 1) уже есть в RAM-кэше — мгновенно
+        if (!force && weekCacheRef.current.has(cacheKey)) {
+            const cached = weekCacheRef.current.get(cacheKey);
+            setByDate(cached.byDate);
             setStatus("");
             return { id, cacheKey };
-        } catch (e) {
-            console.error(e);
-            setStatus("Ошибка: " + e.message);
-            throw e;
-        } finally {
-            setLoading(false);
         }
+
+        // 2) уже грузим это же — подождём существующий промис
+        if (inflightRef.current.has(cacheKey)) {
+            setStatus("Загружаю неделю…");
+            return inflightRef.current.get(cacheKey);
+        }
+
+        setLoading(true);
+        // setStatus("Загружаю неделю…");
+        const p = (async () => {
+            try {
+                const fresh = await fetchWeekFromApi(id, weekStartDate);
+
+                weekCacheRef.current.set(cacheKey, fresh);
+                lsSet(cacheKey, fresh);
+
+                // предзагрузка +/- 1 неделя (без перерисовки)
+                for (const delta of [-7, 7]) {
+                    const sideStart = addDays(weekStartDate, delta);
+                    const sideKey = `${id}::${weekKeyOf(sideStart)}`;
+                    if (!weekCacheRef.current.has(sideKey) && !inflightRef.current.has(sideKey)) {
+                        inflightRef.current.set(sideKey, (async () => {
+                            try {
+                                const side = await fetchWeekFromApi(id, sideStart);
+                                weekCacheRef.current.set(sideKey, side);
+                                lsSet(sideKey, side);
+                            } catch {}
+                            finally { inflightRef.current.delete(sideKey); }
+                        })());
+                    }
+                }
+
+                setByDate(fresh.byDate);
+                setStatus("");
+                return { id, cacheKey };
+            } catch (e) {
+                setStatus("Ошибка: " + e.message);
+                throw e;
+            } finally {
+                inflightRef.current.delete(cacheKey);
+                setLoading(false);
+            }
+        })();
+
+        inflightRef.current.set(cacheKey, p);
+        return p;
     }
 
     async function showDay(dateObj) {
@@ -213,8 +293,8 @@ export default function App() {
         setSelectedDate(dateObj);
 
         if (isoKey(oldStart) === isoKey(newStart)) {
-            // та же неделя — просто убедимся, что данные недели подгружены
-            try { await loadWeekCached({ weekStartDate: newStart }); } catch {}
+            // та же неделя — ничего не грузим
+            return;
         } else {
             // Переход в другую неделю → анимируем шапку (Swiper сам вызовет onPrevWeek/onNextWeek)
             const dir = newStart > oldStart ? "next" : "prev";
@@ -256,10 +336,26 @@ export default function App() {
         if (!term) return;
         (async () => {
             await loadWeekCached({ weekStartDate: anchorDate });
-            setSelectedDate(new Date());
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [term]);
+
+    useEffect(() => {
+        function revalidate() {
+            if (!term) return;
+            // эта функция сама применит SWR-логику: если кэш свежий — не тронет сеть,
+            // если устарел по мягкому TTL — проверит в фоне
+            loadWeekCached({ weekStartDate: anchorDate });
+        }
+        const onVis = () => { if (document.visibilityState === "visible") revalidate(); };
+
+        window.addEventListener("focus", revalidate);
+        window.addEventListener("visibilitychange", onVis);
+        return () => {
+            window.removeEventListener("focus", revalidate);
+            window.removeEventListener("visibilitychange", onVis);
+        };
+    }, [anchorDate, term]);
 
     // ---------- РЕНДЕР ----------
     const header = (

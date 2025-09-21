@@ -2,8 +2,11 @@ import os
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 import requests
-from flask import Flask, jsonify, request, send_from_directory
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from flask import Flask, jsonify, request, send_from_directory, make_response
 from flask_cors import CORS
+from flask_compress import Compress
 from cachetools import TTLCache
 from dotenv import load_dotenv
 
@@ -14,16 +17,27 @@ PORT = int(os.getenv("PORT", "8000"))
 CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", "60"))
 
 app = Flask(__name__)
+
+Compress(app)
+
 # Разрешаем фронт с localhost:5173 (Vite)
 CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}})
 
 # Простой кэш: ключ -> ответ, TTL секунд
 cache = TTLCache(maxsize=512, ttl=CACHE_TTL)
 
+session = requests.Session()
+session.headers.update({"User-Agent": "ruz-proxy/1.0"})
+adapter = HTTPAdapter(pool_connections=20, pool_maxsize=40, max_retries=Retry(
+    total=2, backoff_factor=0.2, status_forcelist=(502, 503, 504)
+))
+session.mount("http://", adapter)
+session.mount("https://", adapter)
+
 def cached_get(key: str, url: str):
     if key in cache:
         return cache[key]
-    r = requests.get(url, timeout=15)
+    r = session.get(url, timeout=10)
     if not r.ok:
         return None, r.status_code
     data = r.json()
@@ -45,7 +59,10 @@ def search():
     data, status = cached_get(key, url)
     if status != 200:
         return jsonify({"error": f"RUZ search {status}"}), status
-    return jsonify(data)
+
+    resp = make_response(jsonify(data), 200)
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
 
 @app.get("/api/schedule/group/<group_id>")
 def schedule_group(group_id):
@@ -54,13 +71,17 @@ def schedule_group(group_id):
     lng = request.args.get("lng", "1")
     if not start or not finish:
         return jsonify({"error": "start & finish required (YYYY.MM.DD)"}), 400
+
     params = urlencode({"start": start, "finish": finish, "lng": lng})
     url = f"{RUZ_BASE}/api/schedule/group/{group_id}?{params}"
     key = f"grp:{group_id}:{start}:{finish}:{lng}"
     data, status = cached_get(key, url)
     if status != 200:
         return jsonify({"error": f"RUZ schedule {status}"}), status
-    return jsonify(data)
+
+    resp = make_response(jsonify(data), 200)
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
 
 # Папка со статикой после билда фронтенда
 app.static_folder = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
