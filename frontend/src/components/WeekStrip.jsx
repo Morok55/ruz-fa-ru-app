@@ -1,35 +1,105 @@
-import React, { useRef } from "react";
+import React, { useMemo, useRef, useEffect } from "react";
+import { Swiper, SwiperSlide } from "swiper/react";
+import "swiper/css";
 
-export default function WeekStrip({ weekDays, selectedDate, onSelectDay, dayLabels, onPrevWeek, onNextWeek }) {
-    const touch = useRef({ x: 0, y: 0, t: 0, active: false });
+/**
+ * Пропсы:
+ * - weekDays: массив 7 Date (текущая неделя)
+ * - selectedDate: выбранная дата
+ * - onSelectDay: (Date) => void
+ * - dayLabels: ["пн","вт",...]
+ * - onPrevWeek / onNextWeek: колбэки смены недели
+ */
+export default function WeekStrip({
+    weekDays,
+    selectedDate,
+    onSelectDay,
+    dayLabels,
+    onPrevWeek,
+    onNextWeek,
+}) {
+    const swiperRef = useRef(null);
 
-    function onTouchStart(e) {
-        const t = e.touches[0];
-        touch.current = { x: t.clientX, y: t.clientY, t: Date.now(), active: true };
-    }
-    function onTouchEnd(e) {
-        if (!touch.current.active) return;
-        const t = e.changedTouches[0];
-        const dx = t.clientX - touch.current.x;
-        const dy = t.clientY - touch.current.y;
-        const dt = Date.now() - touch.current.t;
-        touch.current.active = false;
+    // утилиты локально
+    const addDays = (date, n) => {
+        const d = new Date(date);
+        d.setDate(d.getDate() + n);
+        return d;
+    };
+    const makeWeek = (monday) => Array.from({ length: 7 }, (_, i) => addDays(monday, i));
 
-        // горизонтальный быстрый свайп
-        const THRESHOLD = 40;   // px
-        const MAX_ANGLE = 0.6;  // |dy/dx| — чтобы отсечь вертикальные жесты
-        if (Math.abs(dx) > THRESHOLD && Math.abs(dy) / Math.abs(dx) < MAX_ANGLE && dt < 600) {
-            if (dx < 0) onNextWeek?.(); else onPrevWeek?.();
+    // считаем соседние недели заранее
+    const prevDays = useMemo(() => makeWeek(addDays(weekDays[0], -7)), [weekDays]);
+    const nextDays = useMemo(() => makeWeek(addDays(weekDays[0],  7)), [weekDays]);
+
+    // после смены недели снаружи — удерживаем карусель в центре (слайд 1)
+    useEffect(() => {
+        const sw = swiperRef.current;
+        if (sw && sw.activeIndex !== 1) {
+            sw.slideTo(1, 0); // без анимации
+        }
+    }, [weekDays]);
+
+    function handleSlideChangeTransitionEnd(sw) {
+        // Анимация уже завершилась (плавно доехали до края).
+        if (sw.activeIndex === 0) {
+            onPrevWeek?.();   // просим родителя обновить неделю (теперь текущая = предыдущая)
+            // Возврат в центр сделаем после обновления данных (см. useEffect ниже).
+        } else if (sw.activeIndex === 2) {
+            onNextWeek?.();   // просим родителя обновить неделю (теперь текущая = следующая)
         }
     }
 
     return (
-        <div
-            className="week-strip"
-            onTouchStart={onTouchStart}
-            onTouchEnd={onTouchEnd}
-        >
-            {weekDays.map((d, i) => {
+        <div className="week-strip-swiper">
+            <Swiper
+                onSwiper={(sw) => (swiperRef.current = sw)}
+                onSlideChangeTransitionEnd={handleSlideChangeTransitionEnd}  // <-- меняем событие
+                initialSlide={1}
+                slidesPerView={1}
+                spaceBetween={32}
+                resistanceRatio={0.85}
+                allowTouchMove={true}
+                longSwipesRatio={0.15}
+                speed={260}
+                simulateTouch={true}
+                threshold={5}
+            >
+                <SwiperSlide>
+                    <WeekGrid
+                        days={prevDays}
+                        selectedDate={selectedDate}
+                        onSelectDay={onSelectDay}
+                        dayLabels={dayLabels}
+                    />
+                </SwiperSlide>
+
+                <SwiperSlide>
+                    <WeekGrid
+                        days={weekDays}
+                        selectedDate={selectedDate}
+                        onSelectDay={onSelectDay}
+                        dayLabels={dayLabels}
+                    />
+                </SwiperSlide>
+
+                <SwiperSlide>
+                    <WeekGrid
+                        days={nextDays}
+                        selectedDate={selectedDate}
+                        onSelectDay={onSelectDay}
+                        dayLabels={dayLabels}
+                    />
+                </SwiperSlide>
+            </Swiper>
+        </div>
+    );
+}
+
+function WeekGrid({ days, selectedDate, onSelectDay, dayLabels }) {
+    return (
+        <div className="week-grid">
+            {days.map((d, i) => {
                 const isToday = new Date().toDateString() === d.toDateString();
                 const isActive = selectedDate.toDateString() === d.toDateString();
                 return (

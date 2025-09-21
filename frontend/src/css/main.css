@@ -78,13 +78,22 @@ body {
 .button:disabled { opacity: 0.6; cursor: default; }
 
 /* Лента дней недели */
-.week-strip {
+.week-strip-swiper {
+    width: 100%;
+    margin: 6px 0 0;
+}
+
+/* Swiper: не обрезаем содержимое, чтобы outline/border не резались по краям */
+.week-strip-swiper .swiper {
+    overflow: visible;
+}
+
+/* сетка на 7 колонок */
+.week-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
     gap: 6px;
-    margin: 6px 0 0;
-    width: 100%;
-    touch-action: pan-y;   /* разрешаем вертикальные жесты странице, а горизонтальные ловим в JS */
+    margin: 6px 0 8px;
 }
 
 /* Кнопка дня */
@@ -106,9 +115,17 @@ body {
     text-transform: uppercase;
 
     cursor: pointer;
-    user-select: none;
     appearance: none;             /* убрать системный стиль кнопки */
     -webkit-appearance: none;
+
+    outline: none;
+    -webkit-tap-highlight-color: transparent; /* для мобильных */
+    -webkit-touch-callout: none;
+    user-select: none;
+}
+
+.day-pill:focus {
+    outline: none;
 }
 
 .day-pill .num {
@@ -193,6 +210,7 @@ body {
     color: var(--accent);
     font-weight: 600;
     font-size: 20px;
+    margin-top: 2px;
 }
 .divider {
     height: 1px;
