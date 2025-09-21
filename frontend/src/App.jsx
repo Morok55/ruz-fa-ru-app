@@ -37,11 +37,16 @@ function parseRuzDate(s) {
     return Number.isNaN(t) ? null : new Date(t);
 }
 function isoKey(d) {
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+    // локальный ключ YYYY-MM-DD, без UTC-сдвигов
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
 }
 function weekKeyOf(date) {
     const w = startOfWeek(date);
-    return w.toISOString().slice(0, 10); // ISO Пн этой недели
+    // тот же локальный формат, что и для дней
+    return isoKey(w);
 }
 
 function mergeDayLessons(arr) {
@@ -221,6 +226,18 @@ export default function App() {
         await loadWeekCached({ weekStartDate: nextStart });
     }
 
+    const getLessonsFor = React.useCallback((d) => {
+        // формируем локальный ключ вида YYYY-MM-DD
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const kDash = `${y}-${m}-${dd}`;
+        const kDot  = `${y}.${m}.${dd}`;
+
+        // пробуем оба варианта, чтобы покрыть текущее наполнение byDate
+        return byDate[kDash] || byDate[kDot] || [];
+    }, [byDate]);
+
     useEffect(() => {
         if (!term) return;
         (async () => {
@@ -270,13 +287,14 @@ export default function App() {
 
     return (
         <AppShell header={header}>
-            <Sections>
-                {datesToRender.map((d) => {
-                    const key = isoKey(d);
-                    const lessons = byDate[key] || [];
-                    return <DaySection key={key} date={d} lessons={lessons} />;
-                })}
-            </Sections>
+            <Sections
+                selectedDate={selectedDate}
+                onPrevDay={() => showDay(addDays(selectedDate, -1))}
+                onNextDay={() => showDay(addDays(selectedDate,  1))}
+                renderDay={(d) => (
+                    <DaySection date={d} lessons={getLessonsFor(d)} />
+                )}
+            />
         </AppShell>
     );
 }

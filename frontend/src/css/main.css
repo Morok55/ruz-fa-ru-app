@@ -144,29 +144,37 @@ body {
 .day-pill.today { border-color: #2a3340; }
 .day-pill.active { outline: 2px solid var(--accent); }
 
-/* СКРОЛЛ ИМЕННО ЗДЕСЬ */
-.sections {
-    flex: 1 1 auto;         /* занимает всё оставшееся пространство */
-    min-height: 0;          /* обязательно, иначе не будет скролла */
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    /* scroll-snap-type: y mandatory;
-    scroll-behavior: smooth; */
+
+.sections-swiper {
+    height: calc(100vh - var(--header-h, 140px));
     margin-top: 16px;
-    /* спрятать скроллбар */
-    scrollbar-width: none;      /* Firefox */
-    -ms-overflow-style: none;   /* IE/Edge */
+    overflow: hidden; /* важно: запретить общий скролл */
 }
 
-.sections::-webkit-scrollbar {
-    display: none;              /* Chrome, Safari, Opera */
+/* Сам swiper и враппер должны занять всю высоту области */
+.sections-swiper .swiper,
+.sections-swiper .swiper-wrapper {
+    height: 100%;
+    overflow: visible; /* чтобы бордеры/оутлайны не резались */
 }
 
-/* Каждая секция-день прилипает к началу своего скролл-контейнера */
+/* Каждый слайд — flex-контейнер на всю высоту */
+.sections-swiper .swiper-slide {
+    height: 100%;
+    display: flex;
+    overflow: hidden; /* чтобы внутренний скролл не проливался наружу */
+}
+
 .day-section {
-    scroll-snap-align: start;
-    min-height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;                 /* критично для скролла во flex-родителе */
+    overflow-y: auto;              /* скроллим ТОЛЬКО здесь */
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-align: start;      /* можно оставить, если нужно прилипающее начало */
 }
+
+/* Спрятать вертикальный скроллбар внутри дня (по желанию) */
+.day-section::-webkit-scrollbar { display: none; }
 
 /* Заголовок даты */
 .date-title {
