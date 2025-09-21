@@ -16,6 +16,7 @@ export default function Sections({
     onPrevDay,
     onNextDay,
     gapPx = 32,
+    onSwipeStart, onSwipeMove, onSwipeEnd
 }) {
     const swiperRef = useRef(null);
 
@@ -50,13 +51,38 @@ export default function Sections({
         <main className="sections-swiper">
             <Swiper
                 onSwiper={(sw) => (swiperRef.current = sw)}
-                onSlideChangeTransitionEnd={handleSlideChangeTransitionEnd}
+                onTouchStart={() => onSwipeStart?.()}
+                onSliderMove={(sw) => {
+                    const dx = sw.touches?.diff ?? 0;
+                    const w  = sw.width || 1;
+                    let p = dx / w; if (p < -1) p = -1; if (p > 1) p = 1;
+                    onSwipeMove?.(p);
+                }}
+                onTouchEnd={(sw) => {
+                    // если не произошло сдвига на 0/2 — свайп отменён
+                    if (sw.activeIndex === 1) onSwipeEnd?.(false);
+                }}
+
+                onSlideChangeTransitionStart={(sw) => {
+                    // Здесь точно знаем направление перелистывания и что оно СОСТОЯЛОСЬ.
+                    if (sw.activeIndex === 0) {
+                        onSwipeEnd?.(true, "prev");   // едем к предыдущему дню
+                    } else if (sw.activeIndex === 2) {
+                        onSwipeEnd?.(true, "next");   // едем к следующему дню
+                    }
+                }}
+                onSlideChangeTransitionEnd={(sw) => {
+                    // После окончания анимации — меняем день
+                    if (sw.activeIndex === 0)      onPrevDay?.();
+                    else if (sw.activeIndex === 2) onNextDay?.();
+                }}
+
                 initialSlide={1}
                 slidesPerView={1}
                 spaceBetween={gapPx}
                 resistanceRatio={0.85}
                 speed={260}
-                simulateTouch={true}
+                simulateTouch
                 threshold={5}
             >
                 <SwiperSlide>{renderDay(prevDate)}</SwiperSlide>

@@ -95,10 +95,36 @@ body {
 
 /* сетка на 7 колонок */
 .week-grid {
+    position: relative;
     display: grid;
     grid-template-columns: repeat(7, 1fr);
     gap: 6px;
     margin: 6px 0 8px;
+}
+
+/* Плавающий контур активной таблетки (как на iOS) */
+.pill-ghost {
+    position: absolute;
+    left: 0; top: 6px;
+    border-radius: 14px;
+    box-shadow: 0 0 0 2px var(--accent);
+    pointer-events: none;
+    will-change: transform, width, height; /* подсказка браузеру */
+    transition:
+        transform 260ms cubic-bezier(.22,.61,.36,1),
+        width     260ms cubic-bezier(.22,.61,.36,1),
+        height    260ms cubic-bezier(.22,.61,.36,1),
+        opacity   160ms ease;
+    opacity: 0;
+}
+.pill-ghost.no-tr {
+    transition: none; /* во время перетаскивания — без анимации, максимально отзывчиво */
+}
+
+/* чтобы не было двойной рамки — у активной кнопки можно убрать её собственный outline */
+.day-pill.active {
+    outline: none;
+    box-shadow: none;
 }
 
 /* Кнопка дня */
@@ -142,8 +168,6 @@ body {
 }
 
 .day-pill.today { border-color: #2a3340; }
-.day-pill.active { outline: 2px solid var(--accent); }
-
 
 .sections-swiper {
     height: calc(100vh - var(--header-h, 140px));

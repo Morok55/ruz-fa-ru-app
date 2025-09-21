@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import AppShell from "./components/AppShell.jsx";
 import WeekStrip from "./components/WeekStrip.jsx";
 import Sections from "./components/Sections.jsx";
@@ -172,6 +172,30 @@ export default function App() {
     const weekSwiperRef = useRef(null);
 
     const inflightRef = useRef(new Map()); // cacheKey -> Promise
+
+    const daySwipeProgressRef = useRef(null);
+
+    const swipeHandlersRef = useRef(null);
+
+    const bindDaySwipeProgress = useCallback((handlers) => {
+        swipeHandlersRef.current = handlers; // { start, move, end }
+    }, []);
+
+    const onSwipeStart = useCallback(() => {
+        swipeHandlersRef.current?.start?.();
+    }, []);
+    const onSwipeMove = useCallback((p) => {
+        swipeHandlersRef.current?.move?.(p);
+    }, []);
+    const onSwipeEnd = useCallback((committed, dir) => {
+        // dir: "prev" | "next" | undefined (при отмене)
+        swipeHandlersRef.current?.end?.(committed, dir);
+    }, []);
+
+    // функция, которую будет звать Sections на движении пальца
+    const handleDaySwipeProgress = useCallback((p) => {
+        daySwipeProgressRef.current && daySwipeProgressRef.current(p);
+    }, []);
 
     async function resolveGroupCached(termStr) {
         const hit = groupCacheRef.current.get(termStr);
@@ -390,6 +414,7 @@ export default function App() {
                 onPrevWeek={goPrevWeek}
                 onNextWeek={goNextWeek}
                 onReady={(sw) => (weekSwiperRef.current = sw)}
+                bindDaySwipeProgress={bindDaySwipeProgress}
             />
         </header>
     );
@@ -402,9 +427,10 @@ export default function App() {
                 selectedDate={selectedDate}
                 onPrevDay={() => showDay(addDays(selectedDate, -1))}
                 onNextDay={() => showDay(addDays(selectedDate,  1))}
-                renderDay={(d) => (
-                    <DaySection date={d} lessons={getLessonsFor(d)} />
-                )}
+                renderDay={(d) => <DaySection date={d} lessons={getLessonsFor(d)} />}
+                onSwipeStart={onSwipeStart}
+                onSwipeMove={onSwipeMove}
+                onSwipeEnd={onSwipeEnd}
             />
         </AppShell>
     );
