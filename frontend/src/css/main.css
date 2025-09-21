@@ -19,6 +19,11 @@ body {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
 }
 
+#root {
+    width: 100%;
+    overflow: hidden;
+}
+
 .app {
     max-width: 720px;
     margin: 0 auto;
