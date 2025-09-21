@@ -17,6 +17,7 @@ export default function WeekStrip({
     dayLabels,
     onPrevWeek,
     onNextWeek,
+    onReady,
 }) {
     const swiperRef = useRef(null);
 
@@ -53,7 +54,10 @@ export default function WeekStrip({
     return (
         <div className="week-strip-swiper">
             <Swiper
-                onSwiper={(sw) => (swiperRef.current = sw)}
+                onSwiper={(sw) => {
+                    swiperRef.current = sw;
+                    onReady?.(sw);
+                }}
                 onSlideChangeTransitionEnd={handleSlideChangeTransitionEnd}  // <-- меняем событие
                 initialSlide={1}
                 slidesPerView={1}

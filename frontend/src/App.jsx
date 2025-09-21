@@ -140,6 +140,8 @@ export default function App() {
     const groupCacheRef = useRef(new Map());  // term -> { id, label }
     const weekCacheRef = useRef(new Map());   // cacheKey -> { byDate, fetchedAt }
 
+    const weekSwiperRef = useRef(null);
+
     async function resolveGroupCached(termStr) {
         const hit = groupCacheRef.current.get(termStr);
         if (hit) return hit;
@@ -204,10 +206,22 @@ export default function App() {
 
     async function showDay(dateObj) {
         if (!term) return;
+
+        const oldStart = startOfWeek(selectedDate);
+        const newStart = startOfWeek(dateObj);
+
         setSelectedDate(dateObj);
-        try {
-            await loadWeekCached({ weekStartDate: startOfWeek(dateObj) });
-        } catch {}
+
+        if (isoKey(oldStart) === isoKey(newStart)) {
+            // та же неделя — просто убедимся, что данные недели подгружены
+            try { await loadWeekCached({ weekStartDate: newStart }); } catch {}
+        } else {
+            // Переход в другую неделю → анимируем шапку (Swiper сам вызовет onPrevWeek/onNextWeek)
+            const dir = newStart > oldStart ? "next" : "prev";
+            const sw = weekSwiperRef.current;
+            if (sw) sw.slideTo(dir === "next" ? 2 : 0, 260); // 0=предыдущая, 2=следующая
+            // loadWeekCached запустится в onPrevWeek/onNextWeek по окончании анимации шапки
+        }
     }
 
     async function goPrevWeek() {
@@ -279,6 +293,7 @@ export default function App() {
                 dayLabels={daysRuShort}
                 onPrevWeek={goPrevWeek}
                 onNextWeek={goNextWeek}
+                onReady={(sw) => (weekSwiperRef.current = sw)}
             />
         </header>
     );
