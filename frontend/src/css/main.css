@@ -178,6 +178,7 @@ body {
 
 /* Заголовок даты */
 .date-title {
+    color: var(--muted); 
     margin: 0 0 16px;
     font-size: 18px;
     font-weight: 600;
@@ -231,5 +232,14 @@ body {
     margin: 20px 0 8px;
 }
 
-/* Статусы */
-.status { color: var(--muted); margin: 0 0 10px; }
+/* Статус "Нет занятий" */
+.day-section .status {
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 80%;   /* занять всю высоту дня */
+    text-align: center;
+    font-size: 22px;
+    margin: 0;          /* убираем auto-отступы */
+}
