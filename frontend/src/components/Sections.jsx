@@ -1,6 +1,5 @@
-import React, { useMemo, useRef, useEffect } from "react";
+import React, { useMemo, useRef, useEffect, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
-import "swiper/css";
 
 /**
  * Пропсы:
@@ -20,6 +19,9 @@ export default function Sections({
 }) {
     const swiperRef = useRef(null);
 
+    const [activeIndex, setActiveIndex] = useState(1);
+    const [isAnimating, setIsAnimating] = useState(false);
+
     const addDays = (date, n) => {
         const d = new Date(date);
         d.setDate(d.getDate() + n);
@@ -35,17 +37,13 @@ export default function Sections({
         if (sw && sw.activeIndex !== 1) {
             sw.slideTo(1, 0); // без анимации
         }
+        setActiveIndex(1);
+        setIsAnimating(false);
     }, [selectedDate]);
 
-    function handleSlideChangeTransitionEnd(sw) {
-        // 0=предыдущий день, 1=текущий (центр), 2=следующий
-        if (sw.activeIndex === 0) {
-            onPrevDay?.();
-            // вернёмся в центр после обновления selectedDate (через useEffect выше)
-        } else if (sw.activeIndex === 2) {
-            onNextDay?.();
-        }
-    }
+    const visiblePrev  = (isAnimating && activeIndex === 2) ? selectedDate : prevDate;
+    const visibleNext  = (isAnimating && activeIndex === 0) ? selectedDate : nextDate;
+    const visibleCenter = selectedDate;
 
     return (
         <main className="sections-swiper">
@@ -64,17 +62,25 @@ export default function Sections({
                 }}
 
                 onSlideChangeTransitionStart={(sw) => {
-                    // Здесь точно знаем направление перелистывания и что оно СОСТОЯЛОСЬ.
+                    setIsAnimating(true);
+                    setActiveIndex(sw.activeIndex);
+
                     if (sw.activeIndex === 0) {
-                        onSwipeEnd?.(true, "prev");   // едем к предыдущему дню
+                        onSwipeEnd?.(true, "prev");
                     } else if (sw.activeIndex === 2) {
-                        onSwipeEnd?.(true, "next");   // едем к следующему дню
+                        onSwipeEnd?.(true, "next");
                     }
                 }}
                 onSlideChangeTransitionEnd={(sw) => {
-                    // После окончания анимации — меняем день
-                    if (sw.activeIndex === 0)      onPrevDay?.();
-                    else if (sw.activeIndex === 2) onNextDay?.();
+                    // Сначала сообщаем наружу о смене дня (стейт selectedDate поменяется),
+                    // но до повторного центрирования мы держим isAnimating=true и знаем activeIndex.
+                    if (sw.activeIndex === 0) {
+                        onPrevDay?.();
+                    } else if (sw.activeIndex === 2) {
+                        onNextDay?.();
+                    }
+                    // здесь НЕ сбрасываем isAnimating: это делает эффект по selectedDate,
+                    // когда мгновенно вернёмся на центр (index=1)
                 }}
 
                 initialSlide={1}
@@ -85,9 +91,9 @@ export default function Sections({
                 simulateTouch
                 threshold={5}
             >
-                <SwiperSlide>{renderDay(prevDate)}</SwiperSlide>
-                <SwiperSlide>{renderDay(selectedDate)}</SwiperSlide>
-                <SwiperSlide>{renderDay(nextDate)}</SwiperSlide>
+                <SwiperSlide>{renderDay(visiblePrev)}</SwiperSlide>
+                <SwiperSlide>{renderDay(visibleCenter)}</SwiperSlide>
+                <SwiperSlide>{renderDay(visibleNext)}</SwiperSlide>
             </Swiper>
         </main>
     );

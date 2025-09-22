@@ -170,7 +170,7 @@ body {
     line-height: 1;
 }
 
-.day-pill.today { border-color: #505050; }
+.day-pill.today { border-color: hsl(0, 0%, 100%, 0.2); }
 
 .sections-swiper {
     height: calc(100vh - var(--header-h, 140px));

@@ -419,8 +419,6 @@ export default function App() {
         </header>
     );
 
-    const datesToRender = [selectedDate];
-
     return (
         <AppShell header={header}>
             <Sections
