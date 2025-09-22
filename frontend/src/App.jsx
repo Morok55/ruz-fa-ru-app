@@ -3,6 +3,7 @@ import AppShell from "./components/AppShell.jsx";
 import WeekStrip from "./components/WeekStrip.jsx";
 import Sections from "./components/Sections.jsx";
 import DaySection from "./components/DaySection.jsx";
+import { FaSearch } from "react-icons/fa";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
@@ -51,7 +52,7 @@ function weekKeyOf(date) {
 
 // --- SWR (stale-while-revalidate) ---
 const SWR_STALE  = 1000 * 60 * 5;   // 5 минут — мягкий TTL
-const SWR_EXPIRE = 1000 * 60 * 60;  // 60 минут — жёсткий TTL
+const SWR_EXPIRE = 1000 * 60 * 60 * 10;  // 60 минут — жёсткий TTL
 
 function lsSet(key, value) {
     localStorage.setItem(key, JSON.stringify({ t: Date.now(), v: value }));
@@ -395,15 +396,18 @@ export default function App() {
                     setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
                 }}
             >
-                <input
-                    className="input"
-                    placeholder="Группа"
-                    value={term}
-                    onChange={(e) => setTerm(e.target.value)}
-                />
-                <button className="button" disabled={loading}>
-                    {loading ? "Загрузка…" : "Обновить"}
-                </button>
+                <div className="group-search">
+                    <FaSearch className="search-icon" />
+                    <input
+                        className="input"
+                        placeholder="Группа"
+                        value={term}
+                        onChange={(e) => setTerm(e.target.value)}
+                    />
+                    {/* <button className="button" disabled={loading}>
+                        {loading ? "Загрузка…" : "Обновить"}
+                    </button> */}
+                </div>
             </form>
 
             <WeekStrip
