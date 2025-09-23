@@ -47,7 +47,7 @@ body {
     flex-direction: column;
     align-items: center;
     gap: 10px;
-    margin-top: 45px;
+    margin-top: 50px;
 }
 .header-title {
     font-size: 22px;
@@ -70,15 +70,16 @@ body {
     transform: translateY(2px);
     color: #9aa0a6;
     pointer-events: none;
-    font-size: 14px;
+    font-size: 16px;
 }
 .group-form .input {
     background: none;
     border: none;
     color: var(--text);
     padding: 10px 0 8px 12px;
-    /* border-radius: 12px; */
+    font-size: 16px;
     outline: none;
+    /* border-radius: 12px; */
     /* min-width: 240px; */
 }
 /* .button {
@@ -279,3 +280,27 @@ body {
     font-size: 22px;
     margin: 0;          /* убираем auto-отступы */
 }
+
+/* Анимация загрузки: три мигающие точки */
+@keyframes dotsPulse {
+    0% { opacity: 0.2; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-2px); }
+    100% { opacity: 0.2; transform: translateY(0); }
+}
+
+.loading-dots {
+    display: inline-flex;
+    gap: 10px;
+}
+
+.loading-dots span {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--dot);
+    display: inline-block;
+    animation: dotsPulse 1s infinite ease-in-out;
+}
+
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }

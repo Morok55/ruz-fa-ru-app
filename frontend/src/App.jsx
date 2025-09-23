@@ -52,7 +52,7 @@ function weekKeyOf(date) {
 
 // --- SWR (stale-while-revalidate) ---
 const SWR_STALE  = 1000 * 60 * 5;   // 5 минут — мягкий TTL
-const SWR_EXPIRE = 1000 * 60 * 60 * 10;  // 60 минут — жёсткий TTL
+const SWR_EXPIRE = 1000 * 60 * 60 * 10;  // 10 часов — жёсткий TTL
 
 function lsSet(key, value) {
     localStorage.setItem(key, JSON.stringify({ t: Date.now(), v: value }));
@@ -221,45 +221,75 @@ export default function App() {
 
         // --- SWR: сначала пробуем кэш из localStorage ---
         const pack = lsPeek(cacheKey);
-        if (!force && pack && pack.v?.byDate) {
-            const age = Date.now() - (pack.t || 0);
+
+        // поддержка старого формата: либо { t, v }, либо сразу { byDate, fetchedAt }
+        const cachedValue = pack?.v ?? (pack && pack.byDate ? pack : null);
+        const savedAt = (pack && pack.t) ?? (cachedValue && cachedValue.fetchedAt) ?? 0;
+
+        if (!force && cachedValue && cachedValue.byDate) {
+            const age = Date.now() - savedAt;
 
             if (age <= SWR_EXPIRE) {
-                // Показать мгновенно из LS
-                weekCacheRef.current.set(cacheKey, pack.v);
-                setByDate(pack.v.byDate);
+                // покажем из LS мгновенно
+                weekCacheRef.current.set(cacheKey, { data: cachedValue, savedAt }); // в RAM кладём вместе со временем
+                setByDate(cachedValue.byDate);
                 setStatus("");
 
-                // Если устарело по мягкому TTL — тихо перезагрузим в фоне
+                // если старше мягкого TTL — обновим в фоне
                 if (age > SWR_STALE && !inflightRef.current.has(cacheKey)) {
                     inflightRef.current.set(cacheKey, (async () => {
                         try {
                             const fresh = await fetchWeekFromApi(id, weekStartDate);
-                            weekCacheRef.current.set(cacheKey, fresh);
+                            const now = Date.now();
+                            weekCacheRef.current.set(cacheKey, { data: fresh, savedAt: now });
                             lsSet(cacheKey, fresh);
-                            // Обновляем экран только если пользователь всё ещё на этой неделе
                             setByDate(prev =>
                                 weekKeyOf(weekDays[0]) === weekKeyOf(weekStartDate) ? fresh.byDate : prev
                             );
                         } catch {
-                            // игнор — это фоновая проверка
                         } finally {
                             inflightRef.current.delete(cacheKey);
                         }
                     })());
                 }
-                // Уже показали — можно выйти
                 return { id, cacheKey };
             }
+            // если возраст > EXPIRE — не используем LS-данные (жёсткий TTL)
         }
         // --- конец блока SWR ---
 
         // 1) уже есть в RAM-кэше — мгновенно
-        if (!force && weekCacheRef.current.has(cacheKey)) {
-            const cached = weekCacheRef.current.get(cacheKey);
-            setByDate(cached.byDate);
-            setStatus("");
-            return { id, cacheKey };
+        const mem = weekCacheRef.current.get(cacheKey);
+        if (!force && mem) {
+            const memValue = mem.data ?? mem;              // на случай старого содержимого
+            const memSavedAt = mem.savedAt ?? memValue.fetchedAt ?? 0;
+            const memAge = Date.now() - memSavedAt;
+
+            if (memAge <= SWR_EXPIRE) {
+                setByDate(memValue.byDate);
+                setStatus("");
+
+                // если RAM-кэш старше мягкого TTL — дернём фоновое обновление
+                if (memAge > SWR_STALE && !inflightRef.current.has(cacheKey)) {
+                    inflightRef.current.set(cacheKey, (async () => {
+                        try {
+                            const fresh = await fetchWeekFromApi(id, weekStartDate);
+                            const now = Date.now();
+                            weekCacheRef.current.set(cacheKey, { data: fresh, savedAt: now });
+                            lsSet(cacheKey, fresh);
+                            setByDate(prev =>
+                                weekKeyOf(weekDays[0]) === weekKeyOf(weekStartDate) ? fresh.byDate : prev
+                            );
+                        } catch {
+                        } finally {
+                            inflightRef.current.delete(cacheKey);
+                        }
+                    })());
+                }
+
+                return { id, cacheKey };
+            }
+            // если memAge > EXPIRE — RAM-кэш тоже не используем, идём в сеть
         }
 
         // 2) уже грузим это же — подождём существующий промис
@@ -274,7 +304,8 @@ export default function App() {
             try {
                 const fresh = await fetchWeekFromApi(id, weekStartDate);
 
-                weekCacheRef.current.set(cacheKey, fresh);
+                const now = Date.now();
+                weekCacheRef.current.set(cacheKey, { data: fresh, savedAt: now });
                 lsSet(cacheKey, fresh);
 
                 // предзагрузка +/- 1 неделя (без перерисовки)
@@ -285,7 +316,8 @@ export default function App() {
                         inflightRef.current.set(sideKey, (async () => {
                             try {
                                 const side = await fetchWeekFromApi(id, sideStart);
-                                weekCacheRef.current.set(sideKey, side);
+                                const nowSide = Date.now();
+                                weekCacheRef.current.set(sideKey, { data: side, savedAt: nowSide });
                                 lsSet(sideKey, side);
                             } catch {}
                             finally { inflightRef.current.delete(sideKey); }
@@ -429,7 +461,7 @@ export default function App() {
                 selectedDate={selectedDate}
                 onPrevDay={() => showDay(addDays(selectedDate, -1))}
                 onNextDay={() => showDay(addDays(selectedDate,  1))}
-                renderDay={(d) => <DaySection date={d} lessons={getLessonsFor(d)} />}
+                renderDay={(d) => <DaySection date={d} lessons={getLessonsFor(d)} loading={loading} />}
                 onSwipeStart={onSwipeStart}
                 onSwipeMove={onSwipeMove}
                 onSwipeEnd={onSwipeEnd}

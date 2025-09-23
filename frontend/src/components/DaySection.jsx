@@ -11,13 +11,19 @@ function isoKey(d) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
 }
 
-export default function DaySection({ date, lessons }) {
+export default function DaySection({ date, lessons, loading = false }) {
     const key = isoKey(date);
     return (
         <section className="day-section" data-day={key}>
             <div className="date-title">{fmtDateHeader(date)}</div>
 
-            {!lessons || lessons.length === 0 ? (
+            {(loading && (!lessons || lessons.length === 0)) ? (
+                // состояние загрузки: показываем 3 точки
+                <div className="status loading-dots" aria-label="Загружаю" aria-live="polite">
+                    <span></span><span></span><span></span>
+                </div>
+            ) : (!lessons || lessons.length === 0) ? (
+                // не загружаем и пар нет — показываем пустое состояние
                 <div className="status">Нет занятий</div>
             ) : (
                 lessons.map((l, idx) => {
