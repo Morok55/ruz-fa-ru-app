@@ -378,16 +378,51 @@ export default function App() {
     }
 
     const getLessonsFor = React.useCallback((d) => {
-        // формируем локальный ключ вида YYYY-MM-DD
+        // ключи дня: YYYY-MM-DD и YYYY.MM.DD
         const y = d.getFullYear();
         const m = String(d.getMonth() + 1).padStart(2, "0");
         const dd = String(d.getDate()).padStart(2, "0");
         const kDash = `${y}-${m}-${dd}`;
         const kDot  = `${y}.${m}.${dd}`;
 
-        // пробуем оба варианта, чтобы покрыть текущее наполнение byDate
-        return byDate[kDash] || byDate[kDot] || [];
-    }, [byDate]);
+        // если день в текущей неделе — читаем из состояния byDate
+        const sameWeek =
+            startOfWeek(d).getTime() === startOfWeek(anchorDate).getTime();
+        if (sameWeek) {
+            return byDate[kDash] || byDate[kDot] || [];
+        }
+
+        // иначе — ищем в RAM-кэше недели
+        const group = groupCacheRef.current.get(term);
+        const id = group?.id;
+        if (!id) return undefined;
+
+        const wkKey = `${id}::${weekKeyOf(d)}`;
+        const mem = weekCacheRef.current.get(wkKey);
+        const memValue = mem?.data ?? mem; // на случай старого формата
+
+        if (memValue?.byDate) {
+            return memValue.byDate[kDash] || memValue.byDate[kDot] || [];
+        }
+
+        // нет в RAM — пробуем LocalStorage (могло быть сохранено ранее)
+        const pack = lsPeek(wkKey);
+        const cachedValue = pack?.v ?? (pack && pack.byDate ? pack : null);
+        if (cachedValue?.byDate) {
+            return cachedValue.byDate[kDash] || cachedValue.byDate[kDot] || [];
+        }
+
+        // нигде нет — значит ещё грузится/будет грузиться
+        return undefined; // важно: не [], чтобы DaySection показал «3 точки»
+    }, [byDate, anchorDate, term]);
+
+    const isLoadingFor = React.useCallback((d) => {
+        const group = groupCacheRef.current.get(term);
+        const id = group?.id;
+        if (!id) return false;
+        const wkKey = `${id}::${weekKeyOf(d)}`;
+        return inflightRef.current.has(wkKey);
+    }, [term]);
 
     useEffect(() => {
         if (!term) return;
@@ -459,9 +494,17 @@ export default function App() {
         <AppShell header={header}>
             <Sections
                 selectedDate={selectedDate}
-                onPrevDay={() => showDay(addDays(selectedDate, -1))}
-                onNextDay={() => showDay(addDays(selectedDate,  1))}
-                renderDay={(d) => <DaySection date={d} lessons={getLessonsFor(d)} loading={loading} />}
+                weekDays={weekDays}
+                onSelectDay={(d) => showDay(d)}
+                onPrevDay={() => showDay(addDays(selectedDate, -1))}    // fallback (можно оставить)
+                onNextDay={() => showDay(addDays(selectedDate,  1))}    // fallback (можно оставить)
+                renderDay={(d) => (
+                    <DaySection
+                        date={d}
+                        lessons={getLessonsFor(d)}
+                        loading={getLessonsFor(d) === undefined || isLoadingFor(d)}
+                    />
+                )}
                 onSwipeStart={onSwipeStart}
                 onSwipeMove={onSwipeMove}
                 onSwipeEnd={onSwipeEnd}

@@ -129,6 +129,7 @@ body {
         height    260ms cubic-bezier(.22,.61,.36,1),
         opacity   160ms ease;
     opacity: 0;
+    z-index: 1000;
 }
 .pill-ghost.no-tr {
     transition: none; /* во время перетаскивания — без анимации, максимально отзывчиво */

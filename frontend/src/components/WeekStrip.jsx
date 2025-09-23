@@ -25,6 +25,10 @@ export default function WeekStrip({
     const gridRef = useRef(null);                // .week-grid из центрального слайда
     const pillRefs = useRef(Array(7).fill(null)); // refs на 7 кнопок в центральной неделе
 
+    useEffect(() => {
+        pillRefs.current = Array(7).fill(null);
+    }, [weekDays]);
+
     const ghostRef = useRef(null);
     const dragRef = useRef({
         active: false,
@@ -154,6 +158,55 @@ export default function WeekStrip({
         if (instant) requestAnimationFrame(() => el.classList.remove("no-tr"));
     };
 
+    const handlePillClick = (date, idx, el) => {
+        const gridEl = el?.closest?.(".week-grid");
+        const isCentral = gridRef.current && gridEl === gridRef.current;
+
+        if (isCentral) {
+            // Клик внутри центральной недели → запустим КРАСИВУЮ анимацию
+            const ghost = ghostRef.current;
+            const grid  = gridRef.current;
+            if (!ghost || !grid) {
+                onSelectDay?.(date, idx);
+                return;
+            }
+
+            // базовые измерения
+            dragRef.current.gridRect = grid.getBoundingClientRect();
+            const target = el.getBoundingClientRect();
+
+            // включаем CSS-переходы
+            ghost.classList.remove("no-tr");
+
+            // если призрак ещё не стоял — мгновенно поставим его на текущую активную пилюлю
+            if (!ghost.style.transform) {
+                const currIdx = weekDays.findIndex(d => d.toDateString() === selectedDate.toDateString());
+                const currEl  = pillRefs.current[currIdx];
+                if (currEl) {
+                    applyGhost(currEl.getBoundingClientRect(), { instant: true, visible: true });
+                }
+            }
+
+            // на следующий кадр — плавно переезжаем к целевой пилюле и выбираем день
+            requestAnimationFrame(() => {
+                applyGhost(target, { instant: false, visible: true });
+                onSelectDay?.(date, idx);
+            });
+
+            // для клика внутри недели НИЧЕГО не ждём от week-snap
+            dragRef.current.awaitingWeekSnap = false;
+            return;
+        }
+
+        // Клик в левой/правой сетке (соседние недели) — поведение как раньше
+        if (gridEl) {
+            dragRef.current.gridRect = gridEl.getBoundingClientRect();
+            dragRef.current.awaitingWeekSnap = true; // ждём смены недели и центрирования
+            applyGhost(el.getBoundingClientRect(), { instant: true, visible: true });
+        }
+        onSelectDay?.(date, idx);
+    };
+
     // утилиты локально
     const addDays = (date, n) => {
         const d = new Date(date);
@@ -250,6 +303,7 @@ export default function WeekStrip({
                         selectedDate={selectedDate}
                         onSelectDay={onSelectDay}
                         dayLabels={dayLabels}
+                        onPillClick={handlePillClick}
                     />
                 </SwiperSlide>
 
@@ -257,12 +311,12 @@ export default function WeekStrip({
                     <WeekGrid
                         days={weekDays}
                         selectedDate={selectedDate}
-                        onSelectDay={(d, i) => { onSelectDay(d); moveGhostToIndex(i); }}
+                        onSelectDay={onSelectDay}
                         dayLabels={dayLabels}
                         gridRef={gridRef}
                         getPillRef={(i) => (el) => (pillRefs.current[i] = el)}
+                        onPillClick={handlePillClick}
                     />
-                    <div className="pill-ghost" ref={ghostRef} />
                 </SwiperSlide>
 
                 <SwiperSlide>
@@ -271,14 +325,16 @@ export default function WeekStrip({
                         selectedDate={selectedDate}
                         onSelectDay={onSelectDay}
                         dayLabels={dayLabels}
+                        onPillClick={handlePillClick}
                     />
                 </SwiperSlide>
+                <div ref={ghostRef} className="pill-ghost" aria-hidden="true" />
             </Swiper>
         </div>
     );
 }
 
-function WeekGrid({ days, selectedDate, onSelectDay, dayLabels, gridRef, getPillRef }) {
+function WeekGrid({ days, selectedDate, onSelectDay, dayLabels, gridRef, getPillRef, onPillClick }) {
     return (
         <div className="week-grid" ref={gridRef}>
             {days.map((d, i) => {
@@ -290,7 +346,10 @@ function WeekGrid({ days, selectedDate, onSelectDay, dayLabels, gridRef, getPill
                         ref={getPillRef ? getPillRef(i) : undefined}
                         type="button"
                         className={`day-pill${isToday ? " today" : ""}${isActive ? " active" : ""}`}
-                        onClick={() => onSelectDay(d, i)}
+                        onClick={(e) => {
+                            onPillClick?.(d, i, e.currentTarget);
+                            onSelectDay(d, i);
+                        }}
                         title="Показать расписание на день"
                     >
                         {dayLabels[i]}

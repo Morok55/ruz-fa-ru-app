@@ -11,7 +11,9 @@ import { Swiper, SwiperSlide } from "swiper/react";
  */
 export default function Sections({
     selectedDate,
+    weekDays,                 // массив из 7 дат текущей недели
     renderDay,
+    onSelectDay,              // (date: Date) => void — выбрать день по индексу слайдера
     onPrevDay,
     onNextDay,
     gapPx = 32,
@@ -19,8 +21,11 @@ export default function Sections({
 }) {
     const swiperRef = useRef(null);
 
-    const [activeIndex, setActiveIndex] = useState(1);
-    const [isAnimating, setIsAnimating] = useState(false);
+    // const [activeIndex, setActiveIndex] = useState(1);
+    // const [isAnimating, setIsAnimating] = useState(false);
+
+    const lastIndexRef = useRef(0);       // последний известный индекс (для определения направления)
+    const touchStartIndexRef = useRef(0); // индекс в момент касания (для отмены свайпа)
 
     const addDays = (date, n) => {
         const d = new Date(date);
@@ -28,28 +33,48 @@ export default function Sections({
         return d;
     };
 
-    const prevDate = useMemo(() => addDays(selectedDate, -1), [selectedDate]);
-    const nextDate = useMemo(() => addDays(selectedDate,  1), [selectedDate]);
+    const sameDay = (a, b) =>
+        a && b &&
+        a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate();
+
+    const extendedDays = useMemo(() => {
+        if (!Array.isArray(weekDays) || weekDays.length !== 7) return [];
+        const prevWeekLast = addDays(weekDays[0], -1);   // воскресенье прошлой недели
+        const nextWeekFirst = addDays(weekDays[6], 1);  // понедельник следующей недели
+        return [prevWeekLast, ...weekDays, nextWeekFirst];
+    }, [weekDays]);
+
+    const selectedIndex = useMemo(() => {
+        if (!Array.isArray(extendedDays) || extendedDays.length === 0) return 0;
+        const idx = extendedDays.findIndex(d => sameDay(d, selectedDate));
+        // если выбранный день точно в текущей неделе — это будет индекс 1..7
+        // если его нет (редкий случай) — по умолчанию ставим на понедельник недели (index=1)
+        return idx >= 0 ? idx : 1;
+    }, [extendedDays, selectedDate]);
 
     // После смены дня снаружи — держим слайдер в центре (index=1)
     useEffect(() => {
         const sw = swiperRef.current;
-        if (sw && sw.activeIndex !== 1) {
-            sw.slideTo(1, 0); // без анимации
+        if (sw && typeof selectedIndex === "number" && sw.activeIndex !== selectedIndex) {
+            sw.slideTo(selectedIndex, 0); // без анимации
         }
-        setActiveIndex(1);
-        setIsAnimating(false);
+        lastIndexRef.current = selectedIndex;
     }, [selectedDate]);
 
-    const visiblePrev  = (isAnimating && activeIndex === 2) ? selectedDate : prevDate;
-    const visibleNext  = (isAnimating && activeIndex === 0) ? selectedDate : nextDate;
-    const visibleCenter = selectedDate;
+    // const visiblePrev  = (isAnimating && activeIndex === 2) ? selectedDate : prevDate;
+    // const visibleNext  = (isAnimating && activeIndex === 0) ? selectedDate : nextDate;
+    // const visibleCenter = selectedDate;
 
     return (
         <main className="sections-swiper">
             <Swiper
                 onSwiper={(sw) => (swiperRef.current = sw)}
-                onTouchStart={() => onSwipeStart?.()}
+                onTouchStart={(sw) => {
+                    touchStartIndexRef.current = sw.activeIndex ?? 0;
+                    onSwipeStart?.();
+                }}
                 onSliderMove={(sw) => {
                     const dx = sw.touches?.diff ?? 0;
                     const w  = sw.width || 1;
@@ -57,33 +82,34 @@ export default function Sections({
                     onSwipeMove?.(p);
                 }}
                 onTouchEnd={(sw) => {
-                    // если не произошло сдвига на 0/2 — свайп отменён
-                    if (sw.activeIndex === 1) onSwipeEnd?.(false);
+                    // свайп отменён, если индекс не изменился
+                    if ((sw.activeIndex ?? 0) === touchStartIndexRef.current) {
+                        onSwipeEnd?.(false);
+                    }
                 }}
 
                 onSlideChangeTransitionStart={(sw) => {
-                    setIsAnimating(true);
-                    setActiveIndex(sw.activeIndex);
-
-                    if (sw.activeIndex === 0) {
-                        onSwipeEnd?.(true, "prev");
-                    } else if (sw.activeIndex === 2) {
-                        onSwipeEnd?.(true, "next");
-                    }
+                    const curr = sw.activeIndex ?? 0;
+                    const prev = lastIndexRef.current ?? curr;
+                    const dir = curr < prev ? "prev" : (curr > prev ? "next" : undefined);
+                    if (dir) onSwipeEnd?.(true, dir);
                 }}
                 onSlideChangeTransitionEnd={(sw) => {
-                    // Сначала сообщаем наружу о смене дня (стейт selectedDate поменяется),
-                    // но до повторного центрирования мы держим isAnimating=true и знаем activeIndex.
-                    if (sw.activeIndex === 0) {
-                        onPrevDay?.();
-                    } else if (sw.activeIndex === 2) {
-                        onNextDay?.();
+                    const curr = sw.activeIndex ?? 0;
+                    lastIndexRef.current = curr;
+
+                    if (Array.isArray(extendedDays) && extendedDays.length > 0) {
+                        const idx = Math.max(0, Math.min(curr, extendedDays.length - 1));
+                        const date = extendedDays[idx];
+                        onSelectDay?.(date);
+                    } else {
+                        // fallback
+                        if (curr === 0) onPrevDay?.();
+                        else if (curr === 2) onNextDay?.();
                     }
-                    // здесь НЕ сбрасываем isAnimating: это делает эффект по selectedDate,
-                    // когда мгновенно вернёмся на центр (index=1)
                 }}
 
-                initialSlide={1}
+                initialSlide={selectedIndex}
                 slidesPerView={1}
                 spaceBetween={gapPx}
                 resistanceRatio={0.85}
@@ -91,9 +117,20 @@ export default function Sections({
                 simulateTouch
                 threshold={5}
             >
-                <SwiperSlide>{renderDay(visiblePrev)}</SwiperSlide>
-                <SwiperSlide>{renderDay(visibleCenter)}</SwiperSlide>
-                <SwiperSlide>{renderDay(visibleNext)}</SwiperSlide>
+                {Array.isArray(extendedDays) && extendedDays.length > 0 ? (
+                    extendedDays.map((d) => (
+                        <SwiperSlide key={`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`}>
+                            {renderDay(d)}
+                        </SwiperSlide>
+                    ))
+                ) : (
+                    // fallback на случай, если weekDays не передали
+                    <>
+                        <SwiperSlide>{renderDay(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() - 1))}</SwiperSlide>
+                        <SwiperSlide>{renderDay(selectedDate)}</SwiperSlide>
+                        <SwiperSlide>{renderDay(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() + 1))}</SwiperSlide>
+                    </>
+                )}
             </Swiper>
         </main>
     );
