@@ -502,7 +502,13 @@ export default function App() {
                     <DaySection
                         date={d}
                         lessons={getLessonsFor(d)}
-                        loading={getLessonsFor(d) === undefined || isLoadingFor(d)}
+                        // лоадер показываем, когда:
+                        // 1) идёт загрузка текущей (якорной) недели — глобальный loading === true;
+                        // 2) идёт точечная загрузка нужной недели (inflightRef) — isLoadingFor(d) === true.
+                        loading={
+                            (loading && startOfWeek(d).getTime() === startOfWeek(anchorDate).getTime())
+                            || isLoadingFor(d)
+                        }
                     />
                 )}
                 onSwipeStart={onSwipeStart}

@@ -38,6 +38,10 @@ export default function WeekStrip({
         rightRect: null,  // к следующему дню
         lastP: 0,
         awaitingWeekSnap: false,
+        // добавлено:
+        animating: false,
+        animTargetRect: null,
+        animTargetIndex: null,
     });
 
     dragRef.current.lastP = 0; // -1..1, знак = направление
@@ -53,95 +57,141 @@ export default function WeekStrip({
         if (!bindDaySwipeProgress) return;
 
         const start = () => {
-        const grid = gridRef.current;
-        const idx = weekDays.findIndex(d => d.toDateString() === selectedDate.toDateString());
-        if (!grid || idx < 0) return;
+            const grid  = gridRef.current;
+            const ghost = ghostRef.current;
+            const pills = pillRefs.current;
+            if (!grid || !ghost || !Array.isArray(weekDays) || weekDays.length !== 7) return;
 
-        const pills = pillRefs.current;
-        dragRef.current.gridRect  = grid.getBoundingClientRect();
-        dragRef.current.fromRect  = pills[idx]?.getBoundingClientRect() || null;
-        dragRef.current.leftRect  = pills[Math.max(0, idx - 1)]?.getBoundingClientRect()  || dragRef.current.fromRect;
-        dragRef.current.rightRect = pills[Math.min(6, idx + 1)]?.getBoundingClientRect() || dragRef.current.fromRect;
+            dragRef.current.gridRect = grid.getBoundingClientRect();
 
-        dragRef.current.active = true;
-        dragRef.current.lastP  = 0;
+            let baseIdx = weekDays.findIndex(d => d.toDateString() === selectedDate.toDateString());
+            let baseFrom = null;
 
-        // во время перетягивания — отключаем CSS-транзишны для максимальной отзывчивости
-        ghostRef.current?.classList.add("no-tr");
-    };
+            // если предыдущая плавная анимация ещё идёт — МГНОВЕННО завершить её в сохранённой целевой точке
+            if (dragRef.current.animating && dragRef.current.animTargetRect) {
+                ghost.classList.add("no-tr");        // отключаем transition
+                void ghost.offsetWidth;              // reflow
+                applyGhost(dragRef.current.animTargetRect, { instant: true, visible: true }); // поставить в финал
+                void ghost.offsetWidth;              // reflow
 
-    const move = (p) => {
-        if (!dragRef.current.active) return;
-        dragRef.current.lastP = p;
+                // использовать именно ЦЕЛЬ как новую базу
+                baseIdx = dragRef.current.animTargetIndex ?? baseIdx;
+                baseFrom = dragRef.current.animTargetRect;
 
-        const t = Math.min(1, Math.abs(p));
-        const from = dragRef.current.fromRect;
-        const to   = p < 0 ? dragRef.current.rightRect : dragRef.current.leftRect;
-        if (!from || !to) return;
+                // сброс флагов анимации
+                dragRef.current.animating = false;
+                dragRef.current.animTargetRect = null;
+                dragRef.current.animTargetIndex = null;
+            }
 
-        const lerp = (a,b,t)=>a+(b-a)*t;
-        applyGhost({
-            left:   lerp(from.left,   to.left,   t),
-            top:    lerp(from.top,    to.top,    t),
-            width:  lerp(from.width,  to.width,  t),
-            height: lerp(from.height, to.height, t),
-        });
-    };
+            // если базы ещё нет — берём активную пилюлю
+            if (!baseFrom) {
+                baseFrom = (baseIdx >= 0 ? pills[baseIdx]?.getBoundingClientRect() : null) || ghost.getBoundingClientRect();
+            }
 
-    const end = (committed, dir) => {
-        const el = ghostRef.current;
-        el?.classList.remove("no-tr");
+            // соседи считаем вокруг baseIdx
+            const leftRect  = pills[Math.max(0, baseIdx - 1)]?.getBoundingClientRect()  || baseFrom;
+            const rightRect = pills[Math.min(6, baseIdx + 1)]?.getBoundingClientRect() || baseFrom;
 
-        const grid = gridRef.current;
-        const idx = weekDays.findIndex(d => d.toDateString() === selectedDate.toDateString());
-        const from = dragRef.current.fromRect;
-        if (!grid || !from || idx < 0) { dragRef.current.active = false; return; }
+            dragRef.current.fromRect  = baseFrom;
+            dragRef.current.leftRect  = leftRect;
+            dragRef.current.rightRect = rightRect;
 
-        // Определяем «краевой» кейс: вс→пн (next) или пн→вс (prev)
-        const edgeNext = committed && dir === "next" && idx === 6;
-        const edgePrev = committed && dir === "prev" && idx === 0;
-        const edgeCross = edgeNext || edgePrev;
+            dragRef.current.active = true;
+            dragRef.current.awaitingWeekSnap = false;
+            dragRef.current.lastP = 0;
 
-        if (!committed) {
-            // свайп отменён — вернуться к исходной кнопке
-            applyGhost(from);
+            // во время перетягивания — без transition (останется no-tr)
+            ghost.classList.add("no-tr");
+        };
+
+        const move = (p) => {
+            if (!dragRef.current.active) return;
+            dragRef.current.lastP = p;
+
+            const t = Math.min(1, Math.abs(p));
+            const from = dragRef.current.fromRect;
+            const to   = p < 0 ? dragRef.current.rightRect : dragRef.current.leftRect;
+            if (!from || !to) return;
+
+            const lerp = (a,b,t)=>a+(b-a)*t;
+            applyGhost({
+                left:   lerp(from.left,   to.left,   t),
+                top:    lerp(from.top,    to.top,    t),
+                width:  lerp(from.width,  to.width,  t),
+                height: lerp(from.height, to.height, t),
+            });
+        };
+
+        const end = (committed, dir) => {
+            const el = ghostRef.current;
+            el?.classList.remove("no-tr");
+
+            const grid = gridRef.current;
+            const idx = weekDays.findIndex(d => d.toDateString() === selectedDate.toDateString());
+            const from = dragRef.current.fromRect;
+            if (!grid || !from || idx < 0) { dragRef.current.active = false; return; }
+
+            // Определяем «краевой» кейс: вс→пн (next) или пн→вс (prev)
+            const edgeNext = committed && dir === "next" && idx === 6;
+            const edgePrev = committed && dir === "prev" && idx === 0;
+            const edgeCross = edgeNext || edgePrev;
+
+            if (!committed) {
+                // свайп отменён — вернуться к исходной кнопке
+                applyGhost(from);
+                dragRef.current.active = false;
+                dragRef.current.awaitingWeekSnap = false;
+                return;
+            }
+
+            if (edgeCross) {
+                // ждём новую неделю → призрак скрыт и без transition
+                dragRef.current.awaitingWeekSnap = true;
+                const el = ghostRef.current;
+                if (el) {
+                    el.classList.add("no-tr");
+                    el.style.opacity = "0";
+                }
+                dragRef.current.active = false;
+                return;
+            }
+
+            // обычный соседний день внутри этой недели — доехать к цели
+            let to = from;
+            let targetIndex = idx;
+            if (dir === "next") {
+                to = dragRef.current.rightRect || from;
+                targetIndex = Math.min(6, idx + 1);
+            } else if (dir === "prev") {
+                to = dragRef.current.leftRect || from;
+                targetIndex = Math.max(0, idx - 1);
+            }
+
+            // помечаем плавную анимацию и сохраняем цель + индекс
+            dragRef.current.animating = true;
+            dragRef.current.animTargetRect = to;
+            dragRef.current.animTargetIndex = targetIndex;
+
+            applyGhost(to);
             dragRef.current.active = false;
             dragRef.current.awaitingWeekSnap = false;
-            return;
-        }
 
-        if (edgeCross) {
-            // ждём новую неделю → призрак скрыт и без transition
-            dragRef.current.awaitingWeekSnap = true;
-            const el = ghostRef.current;
-            if (el) {
-                el.classList.add("no-tr");
-                el.style.opacity = "0";
+            // по завершении transition сбросить флаги
+            const ghost = ghostRef.current;
+            if (ghost) {
+                const onEnd = () => {
+                    dragRef.current.animating = false;
+                    dragRef.current.animTargetRect = null;
+                    dragRef.current.animTargetIndex = null;
+                    ghost.removeEventListener("transitionend", onEnd);
+                };
+                ghost.addEventListener("transitionend", onEnd, { once: true });
             }
-            dragRef.current.active = false;
-            return;
-        }
+        };
 
-        // обычный соседний день внутри этой недели — доехать к цели
-        let to = from;
-        if (dir === "next")      to = dragRef.current.rightRect || from;
-        else if (dir === "prev") to = dragRef.current.leftRect  || from;
-
-        applyGhost(to);
-        dragRef.current.active = false;
-        dragRef.current.awaitingWeekSnap = false;
-    };
-
-    bindDaySwipeProgress({ start, move, end });
+        bindDaySwipeProgress({ start, move, end });
     }, [bindDaySwipeProgress, weekDays, selectedDate]);
-
-    function moveGhostToIndex(i) {
-        const grid = gridRef.current;
-        const btn  = pillRefs.current[i];
-        if (!grid || !btn) return;
-        dragRef.current.gridRect = grid.getBoundingClientRect();
-        applyGhost(btn.getBoundingClientRect());
-    }
 
     const applyGhost = (rect, { instant = false, visible = true } = {}) => {
         const el = ghostRef.current;
