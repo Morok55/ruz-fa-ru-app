@@ -9,18 +9,28 @@ export default function GroupSearch({ open, onClose, onPick }) {
     const [results, setResults] = useState([]);
     const inputRef = useRef(null);
 
+    const handleBack = useCallback(() => {
+        onClose();
+    }, [onClose]);
+
     useEffect(() => {
         const tg = window.Telegram?.WebApp;
-        tg?.BackButton?.show();
-        tg?.BackButton?.onClick(() => {
-            onClose();
-        });
+        const bb = tg?.BackButton;
+        if (!bb) return;
 
-        return () => {
-            tg?.BackButton?.offClick?.();
-            tg?.BackButton?.hide?.();
-        };
-    });
+        if (open) {
+            bb.show();
+            bb.onClick(handleBack);
+            return () => {
+                bb.offClick(handleBack); // важно: тот же самый колбэк
+                bb.hide();
+            };
+        } else {
+            // если компонент остаётся смонтирован, но закрывается
+            bb.offClick(handleBack);
+            bb.hide();
+        }
+    }, [open, handleBack]);
 
     useEffect(() => {
         if (open) {
