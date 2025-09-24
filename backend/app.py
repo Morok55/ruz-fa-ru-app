@@ -1,4 +1,6 @@
 import os
+import json
+from pathlib import Path
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 import requests
@@ -15,6 +17,15 @@ load_dotenv()
 RUZ_BASE = os.getenv("RUZ_BASE", "https://ruz.fa.ru")
 PORT = int(os.getenv("PORT", "8000"))
 CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", "60"))
+
+# Путь к локальному индексу групп (создаётся скриптом build_groups_index.py)
+GROUPS_INDEX_PATH = Path(__file__).with_name("groups_index.json")
+
+# Простой кеш в памяти: перезагружаем файл только если изменился mtime
+_groups_cache = {
+    "mtime": 0,
+    "items": [],
+}
 
 app = Flask(__name__)
 
@@ -44,9 +55,71 @@ def cached_get(key: str, url: str):
     cache[key] = (data, 200)
     return data, 200
 
+def load_groups_index():
+    """
+    Загружает backend/groups_index.json в память.
+    Перечитывает файл только если изменился mtime (на случай ручного обновления).
+    Возвращает list[{"id": int, "label": str}, ...]
+    """
+    try:
+        st = GROUPS_INDEX_PATH.stat()
+    except FileNotFoundError:
+        return []
+
+    mtime = int(st.st_mtime)
+    if _groups_cache["mtime"] != mtime:
+        try:
+            data = json.loads(GROUPS_INDEX_PATH.read_text(encoding="utf-8"))
+            items = data.get("items") or []
+            if not isinstance(items, list):
+                items = []
+            _groups_cache["items"] = items
+            _groups_cache["mtime"] = mtime
+        except Exception:
+            _groups_cache["items"] = []
+            _groups_cache["mtime"] = mtime
+    return _groups_cache["items"]
+
 @app.get("/api/health")
 def health():
     return {"ok": True}
+
+@app.get("/api/groups")
+def groups_suggest():
+    """
+    Подсказки групп из локального файла groups_index.json.
+    Параметры:
+      term: строка поиска (без регистра, ищем в label)
+      limit: макс. количество результатов (по умолчанию 50)
+    Ответ:
+      200 OK -> JSON-массив [{ "id": 123, "label": "ТРПО-22-1" }, ...]
+    """
+    term = (request.args.get("term") or "").strip().lower()
+    try:
+        limit = int(request.args.get("limit") or 50)
+    except ValueError:
+        limit = 50
+    limit = max(1, min(200, limit))
+
+    items = load_groups_index()
+    if not term:
+        # ничего не вводили — пусто (или можно вернуть top-N популярных, если появится метрика)
+        result = []
+    else:
+        # фильтрация по подстроке без регистра; поддержим также поиск по id (цифрами)
+        result = []
+        is_digit = term.isdigit()
+        for it in items:
+            lbl = str(it.get("label") or "")
+            gid = str(it.get("id") or "")
+            if (lbl and term in lbl.lower()) or (is_digit and gid.startswith(term)):
+                result.append({"id": it.get("id"), "label": lbl})
+                if len(result) >= limit:
+                    break
+
+    resp = make_response(jsonify(result), 200)
+    resp.headers["Cache-Control"] = "public, max-age=60"
+    return resp
 
 @app.get("/api/search")
 def search():

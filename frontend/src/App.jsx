@@ -3,6 +3,7 @@ import AppShell from "./components/AppShell.jsx";
 import WeekStrip from "./components/WeekStrip.jsx";
 import Sections from "./components/Sections.jsx";
 import DaySection from "./components/DaySection.jsx";
+import GroupSearch from "./components/GroupSearch.jsx";
 import { FaSearch } from "react-icons/fa";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
@@ -165,6 +166,8 @@ export default function App() {
 
     // показываем один день (сегодня) по умолчанию
     const [selectedDate, setSelectedDate] = useState(new Date());
+
+    const [searchOpen, setSearchOpen] = useState(false);
 
     // ------ КЭШИ (память вкладки) ------
     const groupCacheRef = useRef(new Map());  // term -> { id, label }
@@ -453,29 +456,19 @@ export default function App() {
     const header = (
         <header className="header">
             <div className="header-title">Расписание</div>
-            <form
+            <button
+                type="button"
                 className="group-form"
-                onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (!term) return;
-                    await loadWeekCached({ force: true, weekStartDate: anchorDate });
-                    localStorage.setItem("lastGroup", term);
-                    setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
-                }}
+                onClick={() => setSearchOpen(true)}
+                title="Поиск расписания"
             >
                 <div className="group-search">
                     <FaSearch className="search-icon" />
-                    <input
-                        className="input"
-                        placeholder="Группа"
-                        value={term}
-                        onChange={(e) => setTerm(e.target.value)}
-                    />
-                    {/* <button className="button" disabled={loading}>
-                        {loading ? "Загрузка…" : "Обновить"}
-                    </button> */}
+                    <div className="input" style={{ cursor: "pointer" }}>
+                        {label || (term ? term : "Введите группу")}
+                    </div>
                 </div>
-            </form>
+            </button>
 
             <WeekStrip
                 weekDays={weekDays}
@@ -492,6 +485,19 @@ export default function App() {
 
     return (
         <AppShell header={header}>
+            <GroupSearch
+                open={searchOpen}
+                onClose={() => setSearchOpen(false)}
+                onPick={async (g) => {
+                    // выбор группы из подсказок — закрываем модалку,
+                    // обновляем term и грузим неделю
+                    setTerm(g.label);
+                    localStorage.setItem("lastGroup", g.label);
+                    groupCacheRef.current.set(g.label, { id: g.id, label: g.label }); // быстрый кэш
+                    await loadWeekCached({ force: true, weekStartDate: anchorDate });
+                    setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
+                }}
+            />
             <Sections
                 selectedDate={selectedDate}
                 weekDays={weekDays}

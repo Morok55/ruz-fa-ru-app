@@ -63,16 +63,19 @@ body {
     width: 100%;
     justify-content: center;
     margin-bottom: 8px;
+    background: none;
+    border: none;
 }
 .group-form .group-search {
     border-bottom: 1px solid #3a3a3a;
+    padding: 10px 12px 8px;
 }
 .group-form .search-icon {
-    margin-left: 4px;
     transform: translateY(2px);
     color: #9aa0a6;
     pointer-events: none;
     font-size: 16px;
+    display: inline;
 }
 .group-form .input {
     background: none;
@@ -81,6 +84,7 @@ body {
     padding: 10px 0 8px 12px;
     font-size: 16px;
     outline: none;
+    display: inline;
     /* border-radius: 12px; */
     /* min-width: 240px; */
 }
@@ -264,7 +268,7 @@ body {
     color: var(--accent);
     font-weight: 600;
     font-size: 20px;
-    margin-top: 2px;
+    margin-top: 4px;
 }
 .divider {
     height: 1px;
@@ -307,3 +311,130 @@ body {
 
 .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
 .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+/* === GroupSearch modal === */
+.gs-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 50;
+}
+.gs-panel {
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+    padding: 16px;
+
+    display: flex;
+    flex-direction: column; /* сверху вниз */
+    overflow: hidden;       /* отключаем общий скролл */
+}
+
+.gs-title { 
+    text-align: center;
+    /* font-weight: 600; */
+    font-size: 20px;
+    margin-bottom: 20px;
+    margin-top: 60px;
+}
+
+.gs-input-wrap { 
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.gs-input {
+    flex: 1; 
+    padding: 10px 12px;
+    border: 1px solid var(--divider); 
+    border-radius: 10px;
+    background: var(--surface); 
+    color: var(--fg);
+    font-size: 14px;
+}
+
+.gs-cancel { 
+    border: 1px solid var(--divider); 
+    background: transparent; 
+    padding: 9px 12px; 
+    border-radius: 10px; 
+    color: var(--text); 
+    font-size: 14px;
+}
+
+.gs-section { 
+    margin: 16px 0 8px; 
+    color: var(--muted); 
+    font-size: 16px; 
+}
+
+.gs-favs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 0 0 auto;         /* не растягивается */
+}
+
+.gs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    flex: 1 1 auto;         /* занимает всё оставшееся пространство */
+    min-height: 0;          /* важно для корректного расчёта flex-детей */
+    overflow-y: auto;       /* именно список скроллится */
+    -webkit-overflow-scrolling: touch;
+}
+
+.gs-list::-webkit-scrollbar { display: none; }
+
+.gs-item {
+    display: flex; 
+    gap: 10px; 
+    align-items: center; 
+    padding: 10px 12px;
+    background: var(--surface); 
+    border: 1px solid var(--divider);
+    border-radius: 12px; 
+    cursor: pointer; 
+    text-align: left;
+    color: var(--muted);
+    font-size: 14px;
+
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
+}
+
+.gs-item:focus {
+    outline: none;
+}
+
+.gs-item:active {
+    opacity: 0.7;
+}
+
+.gs-item-ico {
+    opacity: .8;
+    color: var(--accent);
+    transform: translateY(2px);
+}
+.gs-empty { 
+    opacity: .6; 
+    padding: 8px 4px; 
+}
+
+.gs-loading { 
+    display: inline-flex; 
+    gap: 10px; 
+    padding: 8px 4px; }
+.gs-loading span { 
+    width: 10px; 
+    height: 10px; border-radius: 50%; 
+    background: var(--dot); 
+    display: inline-block;
+    animation: dotsPulse 1s infinite ease-in-out; 
+}
+.gs-loading span:nth-child(2){ animation-delay:.2s }
+.gs-loading span:nth-child(3){ animation-delay:.4s }
