@@ -65,7 +65,21 @@ body {
     margin-bottom: 8px;
     background: none;
     border: none;
+
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
 }
+
+.group-form:focus {
+    outline: none;
+}
+
+.group-form:active {
+    opacity: 0.7;
+}
+
 .group-form .group-search {
     border-bottom: 1px solid #3a3a3a;
     padding: 10px 12px 8px;
@@ -317,7 +331,24 @@ body {
     position: fixed; inset: 0; background: rgba(0,0,0,.6);
     display: flex; align-items: center; justify-content: center;
     z-index: 50;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 240ms ease;
 }
+
+.gs-overlay.is-open,
+.gs-overlay.is-closing {
+    pointer-events: auto; /* во время анимации клики разрешены */
+}
+
+.gs-overlay.is-open {
+    opacity: 1;
+}
+
+.gs-overlay.is-closing {
+    opacity: 0;
+}
+
 .gs-panel {
     width: 100%;
     height: 100%;
@@ -327,6 +358,17 @@ body {
     display: flex;
     flex-direction: column; /* сверху вниз */
     overflow: hidden;       /* отключаем общий скролл */
+
+    transform: translateX(100%);
+    transition: transform 260ms cubic-bezier(.22,.61,.36,1);
+}
+
+.gs-overlay.is-open .gs-panel {
+    transform: translateX(0);
+}
+
+.gs-overlay.is-closing .gs-panel {
+    transform: translateX(100%);
 }
 
 .gs-title { 
@@ -438,3 +480,4 @@ body {
 }
 .gs-loading span:nth-child(2){ animation-delay:.2s }
 .gs-loading span:nth-child(3){ animation-delay:.4s }
+

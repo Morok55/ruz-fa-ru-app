@@ -9,6 +9,10 @@ export default function GroupSearch({ open, onClose, onPick }) {
     const [results, setResults] = useState([]);
     const inputRef = useRef(null);
 
+    const [shown, setShown] = useState(false);   // смонтирован ли экран
+    const [closing, setClosing] = useState(false); // идёт ли анимация закрытия
+    const [active, setActive] = useState(false); // включает класс is-open через кадр
+
     const handleBack = useCallback(() => {
         onClose();
     }, [onClose]);
@@ -31,6 +35,29 @@ export default function GroupSearch({ open, onClose, onPick }) {
             bb.hide();
         }
     }, [open, handleBack]);
+
+    useEffect(() => {
+        if (open) {
+            // 1) монтируем
+            setShown(true);
+            setClosing(false);
+            setActive(false);
+            // 2) на следующий кадр включаем класс is-open — запустится transition
+            const raf = requestAnimationFrame(() => {
+                setActive(true);
+            });
+            return () => cancelAnimationFrame(raf);
+        } else if (shown) {
+            // запускаем анимацию закрытия
+            setClosing(true);
+            setActive(false); // убираем is-open -> уедет вправо
+            const t = setTimeout(() => {
+                setShown(false);
+                setClosing(false);
+            }, 260); // должно совпадать с CSS
+            return () => clearTimeout(t);
+        }
+    }, [open, shown]);
 
     useEffect(() => {
         if (open) {
@@ -67,10 +94,17 @@ export default function GroupSearch({ open, onClose, onPick }) {
         };
     }, [open, q]);
 
-    if (!open) return null;
+    if (!shown) return null;
+
+    const overlayClass = "gs-overlay " + (active ? "is-open" : (closing ? "is-closing" : ""));
 
     return (
-        <div className="gs-overlay" role="dialog" aria-modal="true">
+        <div
+            className={overlayClass}
+            role="dialog"
+            aria-modal="true"
+            aria-hidden={open ? "false" : "true"}
+        >
             <div className="gs-panel">
                 <div className="gs-title">Поиск расписания</div>
 
