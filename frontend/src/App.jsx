@@ -51,9 +51,18 @@ function weekKeyOf(date) {
     return isoKey(w);
 }
 
-// --- SWR (stale-while-revalidate) ---
-const SWR_STALE  = 1000 * 60 * 5;   // 5 минут — мягкий TTL
-const SWR_EXPIRE = 1000 * 60 * 60 * 10;  // 10 часов — жёсткий TTL
+// Возвращает понедельник от выбранной пользователем даты (видимая неделя)
+function getVisibleWeekStart(date) {
+    return startOfWeek(date || new Date());
+}
+
+function getVisibleWeekKey(date) {
+    return weekKeyOf(getVisibleWeekStart(date));
+}
+
+// --- текущая реальная неделя (первая, что видит пользователь) ---
+const CURRENT_WEEK_START = startOfWeek(new Date());
+const CURRENT_WEEK_KEY = weekKeyOf(CURRENT_WEEK_START);
 
 function lsSet(key, value) {
     localStorage.setItem(key, JSON.stringify({ t: Date.now(), v: value }));
@@ -154,12 +163,20 @@ async function fetchWeekFromApi(id, weekStartDate) {
     return { byDate: tmp, fetchedAt: Date.now() };
 }
 
+function stableByDateString(bd) {
+    // Стабильная строка для сравнения: сортируем ключи дней
+    const res = {};
+    Object.keys(bd || {}).sort().forEach(k => { res[k] = bd[k]; });
+    return JSON.stringify(res);
+}
+
 export default function App() {
     const [term, setTerm] = useState(() => localStorage.getItem("lastGroup") || "");
-    const [status, setStatus] = useState("");
     const [loading, setLoading] = useState(false);
     const [byDate, setByDate] = useState({});        // { "YYYY-MM-DD": Lesson[] }
     const [label, setLabel] = useState("");
+    // триггер для перерисовки, когда обновляем RAM-кэш недель
+    const [cacheTick, setCacheTick] = useState(0);
 
     const [anchorDate, setAnchorDate] = useState(startOfWeek(new Date())); // понедельник отображаемой недели
     const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(anchorDate, i)), [anchorDate]);
@@ -196,11 +213,6 @@ export default function App() {
         swipeHandlersRef.current?.end?.(committed, dir);
     }, []);
 
-    // функция, которую будет звать Sections на движении пальца
-    const handleDaySwipeProgress = useCallback((p) => {
-        daySwipeProgressRef.current && daySwipeProgressRef.current(p);
-    }, []);
-
     async function resolveGroupCached(termStr) {
         const hit = groupCacheRef.current.get(termStr);
         if (hit) return hit;
@@ -214,169 +226,158 @@ export default function App() {
         return val;
     }
 
-    async function loadWeekCached({ force = false, weekStartDate = anchorDate } = {}) {
-        // получим id группы (часто из кэша)
+    async function loadWeekCached({ force = false, weekStartDate = anchorDate, applyToView = false } = {}) {
+        // 1) узнаём id группы
         const { id, label: lbl } = await resolveGroupCached(term);
         setLabel(lbl);
 
         const wkKey = weekKeyOf(weekStartDate);
         const cacheKey = `${id}::${wkKey}`;
 
-        // --- SWR: сначала пробуем кэш из localStorage ---
-        const pack = lsPeek(cacheKey);
+        const isCurrentWeek = wkKey === CURRENT_WEEK_KEY;
+        const isPastWeek = new Date(weekStartDate) < CURRENT_WEEK_START;
 
-        // поддержка старого формата: либо { t, v }, либо сразу { byDate, fetchedAt }
-        const cachedValue = pack?.v ?? (pack && pack.byDate ? pack : null);
-        const savedAt = (pack && pack.t) ?? (cachedValue && cachedValue.fetchedAt) ?? 0;
-
-        if (!force && cachedValue && cachedValue.byDate) {
-            const age = Date.now() - savedAt;
-
-            if (age <= SWR_EXPIRE) {
-                // покажем из LS мгновенно
-                weekCacheRef.current.set(cacheKey, { data: cachedValue, savedAt }); // в RAM кладём вместе со временем
-                setByDate(cachedValue.byDate);
-                setStatus("");
-
-                // если старше мягкого TTL — обновим в фоне
-                if (age > SWR_STALE && !inflightRef.current.has(cacheKey)) {
-                    inflightRef.current.set(cacheKey, (async () => {
-                        try {
-                            const fresh = await fetchWeekFromApi(id, weekStartDate);
-                            const now = Date.now();
-                            weekCacheRef.current.set(cacheKey, { data: fresh, savedAt: now });
-                            lsSet(cacheKey, fresh);
-                            setByDate(prev =>
-                                weekKeyOf(weekDays[0]) === weekKeyOf(weekStartDate) ? fresh.byDate : prev
-                            );
-                        } catch {
-                        } finally {
-                            inflightRef.current.delete(cacheKey);
-                        }
-                    })());
-                }
-                return { id, cacheKey };
+        // 2) читаем из LocalStorage и сразу показываем, если есть
+        const pack = lsPeek(cacheKey); // { t, v } | старый формат
+        const cached = pack?.v ?? (pack && pack.byDate ? pack : null);
+        if (cached?.byDate) {
+            weekCacheRef.current.set(cacheKey, { data: cached, savedAt: Date.now() });
+            // Если надо применить к текущему экрану — рисуем немедленно
+            if (applyToView) {
+                setByDate(cached.byDate);
             }
-            // если возраст > EXPIRE — не используем LS-данные (жёсткий TTL)
-        }
-        // --- конец блока SWR ---
-
-        // 1) уже есть в RAM-кэше — мгновенно
-        const mem = weekCacheRef.current.get(cacheKey);
-        if (!force && mem) {
-            const memValue = mem.data ?? mem;              // на случай старого содержимого
-            const memSavedAt = mem.savedAt ?? memValue.fetchedAt ?? 0;
-            const memAge = Date.now() - memSavedAt;
-
-            if (memAge <= SWR_EXPIRE) {
-                setByDate(memValue.byDate);
-                setStatus("");
-
-                // если RAM-кэш старше мягкого TTL — дернём фоновое обновление
-                if (memAge > SWR_STALE && !inflightRef.current.has(cacheKey)) {
-                    inflightRef.current.set(cacheKey, (async () => {
-                        try {
-                            const fresh = await fetchWeekFromApi(id, weekStartDate);
-                            const now = Date.now();
-                            weekCacheRef.current.set(cacheKey, { data: fresh, savedAt: now });
-                            lsSet(cacheKey, fresh);
-                            setByDate(prev =>
-                                weekKeyOf(weekDays[0]) === weekKeyOf(weekStartDate) ? fresh.byDate : prev
-                            );
-                        } catch {
-                        } finally {
-                            inflightRef.current.delete(cacheKey);
-                        }
-                    })());
-                }
-
-                return { id, cacheKey };
-            }
-            // если memAge > EXPIRE — RAM-кэш тоже не используем, идём в сеть
         }
 
-        // 2) уже грузим это же — подождём существующий промис
+        // 3) политика "прошлые недели": если есть в LS и не force — ничего не запрашиваем
+        if (!force && isPastWeek && cached?.byDate) {
+            return { id, cacheKey, from: "ls-past" };
+        }
+
+        // 4) защита от параллельных запросов одной и той же недели
         if (inflightRef.current.has(cacheKey)) {
-            setStatus("Загружаю неделю…");
             return inflightRef.current.get(cacheKey);
         }
 
-        setLoading(true);
-        // setStatus("Загружаю неделю…");
+        // 5) грузим из API и раскладываем по политике:
+        //    - текущая неделя → обновляем состояние и ПИШЕМ в LS
+        //    - будущие/прошлые (кроме случая 3) → только RAM (без LS)
         const p = (async () => {
             try {
                 const fresh = await fetchWeekFromApi(id, weekStartDate);
 
-                const now = Date.now();
-                weekCacheRef.current.set(cacheKey, { data: fresh, savedAt: now });
-                lsSet(cacheKey, fresh);
+                const prevHash = stableByDateString(cached?.byDate || {});
+                const newHash  = stableByDateString(fresh.byDate || {});
 
-                // предзагрузка +/- 1 неделя (без перерисовки)
-                for (const delta of [-7, 7]) {
-                    const sideStart = addDays(weekStartDate, delta);
-                    const sideKey = `${id}::${weekKeyOf(sideStart)}`;
-                    if (!weekCacheRef.current.has(sideKey) && !inflightRef.current.has(sideKey)) {
-                        inflightRef.current.set(sideKey, (async () => {
-                            try {
-                                const side = await fetchWeekFromApi(id, sideStart);
-                                const nowSide = Date.now();
-                                weekCacheRef.current.set(sideKey, { data: side, savedAt: nowSide });
-                                lsSet(sideKey, side);
-                            } catch {}
-                            finally { inflightRef.current.delete(sideKey); }
-                        })());
+                if (newHash !== prevHash) {
+                    // если надо применить к текущему экрану — обновим
+                    if (applyToView) {
+                        setByDate(fresh.byDate);
+                    }
+                    // пишем в LS только текущую реальную неделю
+                    if (isCurrentWeek) {
+                        lsSet(cacheKey, fresh);
                     }
                 }
 
-                setByDate(fresh.byDate);
-                setStatus("");
-                return { id, cacheKey };
-            } catch (e) {
-                setStatus("Ошибка: " + e.message);
-                throw e;
+                // всегда держим в RAM-кэше актуальную версию
+                weekCacheRef.current.set(cacheKey, { data: fresh, savedAt: Date.now() });
+                setCacheTick(t => t + 1);
+
+                // 6) предзагрузка одной "недели назад" в RAM,
+                //    но только когда грузим текущую реальную неделю
+                if (isCurrentWeek) {
+                    const prevStart = addDays(weekStartDate, -7);
+                    const prevKey = `${id}::${weekKeyOf(prevStart)}`;
+
+                    // если прошлой недели нет в LS и она ещё не в RAM/не грузится — предзагрузим в RAM
+                    const prevInLs = lsPeek(prevKey);
+                    if (!prevInLs && !weekCacheRef.current.get(prevKey) && !inflightRef.current.get(prevKey)) {
+                        const prevPromise = (async () => {
+                            try {
+                                const prevFresh = await fetchWeekFromApi(id, prevStart);
+                                weekCacheRef.current.set(prevKey, { data: prevFresh, savedAt: Date.now() });
+                                setCacheTick(t => t + 1);
+                            } catch (e) {
+                                console.warn("Не удалось предзагрузить предыдущую неделю:", e);
+                            } finally {
+                                inflightRef.current.delete(prevKey);
+                            }
+                        })();
+                        inflightRef.current.set(prevKey, prevPromise);
+                    }
+                }
+
+                // предзагрузка одной "недели вперёд" в RAM (для быстрого листания)
+                const nextStart = addDays(weekStartDate, 7);
+                const nextKey = `${id}::${weekKeyOf(nextStart)}`;
+
+                if (!weekCacheRef.current.get(nextKey) && !inflightRef.current.get(nextKey)) {
+                    const nextPromise = (async () => {
+                        try {
+                            const nextFresh = await fetchWeekFromApi(id, nextStart);
+                            weekCacheRef.current.set(nextKey, { data: nextFresh, savedAt: Date.now() });
+                            setCacheTick(t => t + 1);
+                        } catch (e) {
+                            console.warn("Не удалось предзагрузить следующую неделю:", e);
+                        } finally {
+                            inflightRef.current.delete(nextKey);
+                        }
+                    })();
+                    inflightRef.current.set(nextKey, nextPromise);
+                }
+
+                return { id, cacheKey, from: "network" };
             } finally {
                 inflightRef.current.delete(cacheKey);
                 setLoading(false);
             }
         })();
 
+        setLoading(true);
         inflightRef.current.set(cacheKey, p);
         return p;
     }
 
-    async function showDay(dateObj) {
-        if (!term) return;
+    async function showDay(d) {
+        if (!term || !(d instanceof Date)) return;
 
         const oldStart = startOfWeek(selectedDate);
-        const newStart = startOfWeek(dateObj);
+        const newStart = startOfWeek(d);
 
-        setSelectedDate(dateObj);
+        setSelectedDate(d);
 
         if (isoKey(oldStart) === isoKey(newStart)) {
-            // та же неделя — ничего не грузим
-            return;
+            return; // та же неделя — ничего не грузим
         } else {
             // Переход в другую неделю → анимируем шапку (Swiper сам вызовет onPrevWeek/onNextWeek)
             const dir = newStart > oldStart ? "next" : "prev";
             const sw = weekSwiperRef.current;
-            if (sw) sw.slideTo(dir === "next" ? 2 : 0, 260); // 0=предыдущая, 2=следующая
-            // loadWeekCached запустится в onPrevWeek/onNextWeek по окончании анимации шапки
+            if (sw) sw.slideTo(dir === "next" ? 2 : 0, 100); // 0=предыдущая, 2=следующая
+            // loadWeekCached запустится в onPrevWeek/onNextWeek
         }
     }
 
     async function goPrevWeek() {
         if (!term) return;
         const prevStart = addDays(anchorDate, -7);
+        const nextSelected = sameWeekdayInWeek(prevStart, selectedDate);
+
         setAnchorDate(prevStart);
-        setSelectedDate(prev => sameWeekdayInWeek(prevStart, prev));
+        setSelectedDate(nextSelected);
+
+        // подгружаем видимую неделю и применяем к экрану
         await loadWeekCached({ weekStartDate: prevStart });
     }
 
     async function goNextWeek() {
         if (!term) return;
         const nextStart = addDays(anchorDate, 7);
+        const nextSelected = sameWeekdayInWeek(nextStart, selectedDate);
+
         setAnchorDate(nextStart);
-        setSelectedDate(prev => sameWeekdayInWeek(nextStart, prev));
+        setSelectedDate(nextSelected);
+
+        // подгружаем видимую неделю и применяем к экрану
         await loadWeekCached({ weekStartDate: nextStart });
     }
 
@@ -388,11 +389,13 @@ export default function App() {
         const kDash = `${y}-${m}-${dd}`;
         const kDot  = `${y}.${m}.${dd}`;
 
-        // если день в текущей неделе — читаем из состояния byDate
+        // если день в текущей (видимой) неделе — читаем из состояния byDate
         const sameWeek =
             startOfWeek(d).getTime() === startOfWeek(anchorDate).getTime();
         if (sameWeek) {
-            return byDate[kDash] || byDate[kDot] || [];
+            const v = byDate?.[kDash] ?? byDate?.[kDot];
+            // если день ещё не успел приехать — вернём undefined (покажет лоадер), а не []
+            return v === undefined ? undefined : v;
         }
 
         // иначе — ищем в RAM-кэше недели
@@ -405,19 +408,22 @@ export default function App() {
         const memValue = mem?.data ?? mem; // на случай старого формата
 
         if (memValue?.byDate) {
-            return memValue.byDate[kDash] || memValue.byDate[kDot] || [];
+            const v = memValue.byDate[kDash] ?? memValue.byDate[kDot];
+            // если конкретный день ещё не подгружен — пусть будет undefined (покажет лоадер)
+            return v === undefined ? undefined : v;
         }
 
         // нет в RAM — пробуем LocalStorage (могло быть сохранено ранее)
         const pack = lsPeek(wkKey);
         const cachedValue = pack?.v ?? (pack && pack.byDate ? pack : null);
         if (cachedValue?.byDate) {
-            return cachedValue.byDate[kDash] || cachedValue.byDate[kDot] || [];
+            const v = cachedValue.byDate[kDash] ?? cachedValue.byDate[kDot];
+            return v === undefined ? undefined : v;
         }
 
         // нигде нет — значит ещё грузится/будет грузиться
         return undefined; // важно: не [], чтобы DaySection показал «3 точки»
-    }, [byDate, anchorDate, term]);
+    }, [byDate, anchorDate, term, cacheTick]);
 
     const isLoadingFor = React.useCallback((d) => {
         const group = groupCacheRef.current.get(term);
@@ -425,7 +431,7 @@ export default function App() {
         if (!id) return false;
         const wkKey = `${id}::${weekKeyOf(d)}`;
         return inflightRef.current.has(wkKey);
-    }, [term]);
+    }, [term, cacheTick]);
 
     useEffect(() => {
         if (!term) return;
@@ -438,8 +444,7 @@ export default function App() {
     useEffect(() => {
         function revalidate() {
             if (!term) return;
-            // эта функция сама применит SWR-логику: если кэш свежий — не тронет сеть,
-            // если устарел по мягкому TTL — проверит в фоне
+            // при возврате во вкладку — проверяем актуальность текущей недели и обновляем из API
             loadWeekCached({ weekStartDate: anchorDate });
         }
         const onVis = () => { if (document.visibilityState === "visible") revalidate(); };
@@ -451,6 +456,12 @@ export default function App() {
             window.removeEventListener("visibilitychange", onVis);
         };
     }, [anchorDate, term]);
+
+    useEffect(() => {
+        const vs = getVisibleWeekStart(selectedDate);
+        loadWeekCached({ weekStartDate: vs, applyToView: true }).catch(() => {});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [getVisibleWeekKey(selectedDate)]);
 
     // ---------- РЕНДЕР ----------
     const header = (

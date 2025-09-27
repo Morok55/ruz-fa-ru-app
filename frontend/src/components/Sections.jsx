@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useEffect, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
+import "swiper/css";
 
 /**
  * Пропсы:
@@ -42,7 +43,7 @@ export default function Sections({
     const extendedDays = useMemo(() => {
         if (!Array.isArray(weekDays) || weekDays.length !== 7) return [];
         const prevWeekLast = addDays(weekDays[0], -1);   // воскресенье прошлой недели
-        const nextWeekFirst = addDays(weekDays[6], 1);  // понедельник следующей недели
+        const nextWeekFirst = addDays(weekDays[6], 1);   // понедельник следующей недели
         return [prevWeekLast, ...weekDays, nextWeekFirst];
     }, [weekDays]);
 
