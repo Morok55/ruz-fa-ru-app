@@ -365,8 +365,8 @@ export default function App() {
         setAnchorDate(prevStart);
         setSelectedDate(nextSelected);
 
-        // подгружаем видимую неделю и применяем к экрану
-        await loadWeekCached({ weekStartDate: prevStart });
+        // ВАЖНО: применяем загруженную неделю к экрану
+        await loadWeekCached({ weekStartDate: prevStart, applyToView: true });
     }
 
     async function goNextWeek() {
@@ -377,8 +377,8 @@ export default function App() {
         setAnchorDate(nextStart);
         setSelectedDate(nextSelected);
 
-        // подгружаем видимую неделю и применяем к экрану
-        await loadWeekCached({ weekStartDate: nextStart });
+        // ВАЖНО: применяем загруженную неделю к экрану
+        await loadWeekCached({ weekStartDate: nextStart, applyToView: true });
     }
 
     const getLessonsFor = React.useCallback((d) => {
@@ -505,7 +505,7 @@ export default function App() {
                     setTerm(g.label);
                     localStorage.setItem("lastGroup", g.label);
                     groupCacheRef.current.set(g.label, { id: g.id, label: g.label }); // быстрый кэш
-                    await loadWeekCached({ force: true, weekStartDate: anchorDate });
+                    await loadWeekCached({ force: true, weekStartDate: anchorDate, applyToView: true });
                     setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
                 }}
             />
