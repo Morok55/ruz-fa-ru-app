@@ -18,15 +18,39 @@ export default function Sections({
     onPrevDay,
     onNextDay,
     gapPx = 32,
-    onSwipeStart, onSwipeMove, onSwipeEnd
+    onSwipeStart, onSwipeMove, onSwipeEnd,
+    onPullDownRefresh,
+    refreshing
 }) {
     const swiperRef = useRef(null);
 
-    // const [activeIndex, setActiveIndex] = useState(1);
-    // const [isAnimating, setIsAnimating] = useState(false);
-
     const lastIndexRef = useRef(0);       // последний известный индекс (для определения направления)
     const touchStartIndexRef = useRef(0); // индекс в момент касания (для отмены свайпа)
+
+    // PTR (pull-to-refresh)
+    const ptrStartX = useRef(0);
+    const ptrStartY = useRef(0);
+    const ptrActive = useRef(false);
+    const [pullPx, setPullPx] = useState(0);     // текущий сдвиг кружка
+    const [ptrAnimate, setPtrAnimate] = useState(false); // включить transition на отпускании
+    const [ptrSpin, setPtrSpin] = useState(false); // крутить иконку (только для PTR)
+    const pullPxRef = useRef(0);
+    useEffect(() => { pullPxRef.current = pullPx; }, [pullPx]);
+
+    // настройки жеста
+    const PULL_MAX = 110;     // максимум визуального сдвига при перетягивании
+    const PULL_TRIGGER = 70;  // порог срабатывания refresh на отпускании
+    const PULL_SNAP = 44;     // фиксированная высота кружка в «закреплённом» состоянии
+    const pullAngle = (Math.min(1, pullPx / PULL_MAX) * 300);     // угол поворота по ходу жеста (0..-300deg)
+
+    // этот реф отмечает, что refresh запущен ИМЕННО жестом pull-to-refresh
+    const ptrOwnRefresh = useRef(false);
+
+    // PTR разрешён только если активный день прокручен к началу (scrollTop === 0)
+    const ptrAllowedRef = useRef(false);
+
+    // понадобится ref на корневой контейнер, чтобы искать активный день
+    const containerRef = useRef(null);
 
     const addDays = (date, n) => {
         const d = new Date(date);
@@ -64,12 +88,132 @@ export default function Sections({
         lastIndexRef.current = selectedIndex;
     }, [selectedDate]);
 
-    // const visiblePrev  = (isAnimating && activeIndex === 2) ? selectedDate : prevDate;
-    // const visibleNext  = (isAnimating && activeIndex === 0) ? selectedDate : nextDate;
-    // const visibleCenter = selectedDate;
+    useEffect(() => {
+        if (refreshing) {
+            if (ptrOwnRefresh.current) {
+                setPtrAnimate(true);
+                setPullPx(PULL_SNAP);
+                // ptrSpin уже включён на отпускании — оставляем
+            } else {
+                // «чужая» загрузка — кружок не трогаем
+                setPtrSpin(false);
+                setPullPx(0);
+            }
+        } else {
+            if (ptrOwnRefresh.current) {
+                setPtrAnimate(true);
+                const t = setTimeout(() => {
+                    setPullPx(0);
+                    setPtrSpin(false);
+                    ptrOwnRefresh.current = false;
+                }, 90);
+                return () => clearTimeout(t);
+            } else {
+                setPtrSpin(false);
+                setPullPx(0);
+            }
+        }
+    }, [refreshing]);
 
     return (
-        <main className="sections-swiper">
+        <main
+            ref={containerRef}
+            className="sections-swiper"
+            onTouchStart={(e) => {
+                if (refreshing) return; // пока грузимся — не стартуем новый жест
+                const t = e.touches?.[0];
+                if (!t) return;
+
+                // проверяем: активный день прокручен в самый верх?
+                let atTop = false;
+                try {
+                    const root = containerRef.current;
+                    const activeDay = root?.querySelector(".swiper-slide-active .day-section");
+                    atTop = !!activeDay && (activeDay.scrollTop <= 0);
+                } catch (_) { /* no-op */ }
+                ptrAllowedRef.current = atTop;
+
+                ptrStartX.current = t.pageX;
+                ptrStartY.current = t.pageY;
+                ptrActive.current = true;
+                ptrOwnRefresh.current = false;
+                setPtrAnimate(false);   // во время перетягивания — без transition
+                setPullPx(0);
+            }}
+            onTouchMove={(e) => {
+                if (!ptrActive.current || refreshing) return;
+
+                // PTR разрешён только если в момент старта список был вверху
+                if (!ptrAllowedRef.current) return;
+
+                const t = e.touches?.[0];
+                if (!t) return;
+                const dx = t.pageX - ptrStartX.current;
+                const dy = t.pageY - ptrStartY.current;
+
+                // отсеиваем горизонтальный свайп (листание дней)
+                if (Math.abs(dx) > Math.abs(dy) * 1.1) return;
+
+                // тянем вниз → двигаем кружок; применяем «резинку» ближе к PULL_MAX
+                if (dy > 0) {
+                    const k = dy / PULL_MAX;
+                    const damp = k < 1 ? dy : PULL_MAX + (dy - PULL_MAX) * 0.25; // rubber-band после MAX
+                    setPullPx(Math.min(PULL_MAX + 60, damp));
+                }
+            }}
+            onTouchEnd={() => {
+                if (!ptrActive.current) return;
+                ptrActive.current = false;
+
+                // если список не был вверху — это обычный скролл, PTR не трогаем
+                if (!ptrAllowedRef.current) {
+                    setPtrAnimate(false);
+                    setPullPx(0);
+                    setPtrSpin(false);
+                    return;
+                }
+
+                setPtrAnimate(true);
+
+                // берём актуальное значение потяга
+                const pulled = pullPxRef.current;
+
+                // не дотянули — аккуратно спрятать
+                if (pulled < PULL_TRIGGER || refreshing) {
+                    setPullPx(0);
+                    setPtrSpin(false);
+                    return;
+                }
+
+                // дотянули → фиксируем пузырёк и запускаем refresh как PTR
+                ptrOwnRefresh.current = true;
+                setPullPx(PULL_SNAP);
+                setPtrSpin(true); // ← запустить спин немедленно (не ждём flip loading)
+                requestAnimationFrame(() => {
+                    onPullDownRefresh?.();
+                });
+            }}
+        >
+            <div
+                className={`ptr ${ptrAnimate ? "ptr-animate" : ""} ${ptrSpin ? "is-refreshing" : ""} ${pullPx > 0 ? "is-visible" : ""}`}
+                style={{ transform: `translateY(${pullPx}px)` }}
+                aria-hidden="true"
+            >
+                <div className="ptr-bubble">
+                    {/* Ротатор: поворачиваем за пальцем */}
+                    <div
+                        className="ptr-rotor"
+                        style={{ transform: `rotate(${pullAngle}deg)` }}
+                    >
+                        {/* ВСТАВЛЕНА СТОРОННЯЯ SVG-ИКОНКА */}
+                        <svg className="ptr-icon-svg" viewBox="0 0 28 28" width="20" height="20" aria-hidden="true">
+                            <path fill="currentColor" d="M22,16c0,4.41-3.586,8-8,8s-8-3.59-8-8s3.586-8,8-8l2.359,0.027l-1.164,1.164l2.828,2.828
+                                L24.035,6l-6.012-6l-2.828,2.828L16.375,4H14C7.375,4,2,9.371,2,16s5.375,12,12,12s12-5.371,12-12H22z"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
             <Swiper
                 onSwiper={(sw) => (swiperRef.current = sw)}
                 onTouchStart={(sw) => {

@@ -381,6 +381,17 @@ export default function App() {
         await loadWeekCached({ weekStartDate: nextStart, applyToView: true });
     }
 
+    // принудительно обновить текущую видимую неделю (pull-to-refresh)
+    async function refreshCurrentWeek() {
+        if (!term) return;
+        // принудительно заберём эту неделю и применим на экран
+        try {
+            await loadWeekCached({ force: true, weekStartDate: anchorDate, applyToView: true });
+        } catch (e) {
+            console.error("refreshCurrentWeek failed", e);
+        }
+    }
+
     const getLessonsFor = React.useCallback((d) => {
         // ключи дня: YYYY-MM-DD и YYYY.MM.DD
         const y = d.getFullYear();
@@ -531,6 +542,8 @@ export default function App() {
                 onSwipeStart={onSwipeStart}
                 onSwipeMove={onSwipeMove}
                 onSwipeEnd={onSwipeEnd}
+                onPullDownRefresh={refreshCurrentWeek}
+                refreshing={loading}
             />
         </AppShell>
     );
