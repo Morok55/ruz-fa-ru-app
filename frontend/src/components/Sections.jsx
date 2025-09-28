@@ -38,10 +38,18 @@ export default function Sections({
     useEffect(() => { pullPxRef.current = pullPx; }, [pullPx]);
 
     // настройки жеста
-    const PULL_MAX = 110;     // максимум визуального сдвига при перетягивании
-    const PULL_TRIGGER = 70;  // порог срабатывания refresh на отпускании
-    const PULL_SNAP = 44;     // фиксированная высота кружка в «закреплённом» состоянии
+    // сколько нужно «утащить», чтобы вообще ПОКАЗАТЬ кружок (до этого он скрыт)
+    const PULL_SHOW = 50;          // px видимого смещения до первого показа
+    // сколько нужно утащить ПОСЛЕ показа, чтобы сработал refresh (сложнее вытащить)
+    const PULL_TRIGGER = 70;       // px видимого смещения до триггера
+    // максимальное видимое смещение (дальше — резинка)
+    const PULL_MAX = 95;          // px
+    const PULL_SNAP = 44;          // фиксация пузырька при refresh
+    const VERTICAL_RATIO = 3;    // насколько жест должен быть «вертикальным»
     const pullAngle = (Math.min(1, pullPx / PULL_MAX) * 300);     // угол поворота по ходу жеста (0..-300deg)
+    // минимум 1 секунда удержания кружка после успешного PTR
+    const ptrHoldUntilRef = useRef(0);
+    const ptrHoldTimerRef = useRef(null);
 
     // этот реф отмечает, что refresh запущен ИМЕННО жестом pull-to-refresh
     const ptrOwnRefresh = useRef(false);
@@ -102,12 +110,24 @@ export default function Sections({
         } else {
             if (ptrOwnRefresh.current) {
                 setPtrAnimate(true);
-                const t = setTimeout(() => {
+                const now = Date.now();
+                const remain = Math.max(0, ptrHoldUntilRef.current - now); // сколько осталось до 1s
+
+                // если сеть ответила раньше — досидим до конца «минимума»
+                if (ptrHoldTimerRef.current) clearTimeout(ptrHoldTimerRef.current);
+                ptrHoldTimerRef.current = setTimeout(() => {
                     setPullPx(0);
                     setPtrSpin(false);
                     ptrOwnRefresh.current = false;
-                }, 90);
-                return () => clearTimeout(t);
+                    ptrHoldUntilRef.current = 0;
+                    ptrHoldTimerRef.current = null;
+                }, remain || 90);
+                return () => {
+                    if (ptrHoldTimerRef.current) {
+                        clearTimeout(ptrHoldTimerRef.current);
+                        ptrHoldTimerRef.current = null;
+                    }
+                };
             } else {
                 setPtrSpin(false);
                 setPullPx(0);
@@ -142,22 +162,35 @@ export default function Sections({
             }}
             onTouchMove={(e) => {
                 if (!ptrActive.current || refreshing) return;
-
-                // PTR разрешён только если в момент старта список был вверху
                 if (!ptrAllowedRef.current) return;
+
+                // если в процессе пользователь всё-таки проскроллил контент — PTR отменяем
+                try {
+                    const root = containerRef.current;
+                    const activeDay = root?.querySelector(".swiper-slide-active .day-section");
+                    if (activeDay && activeDay.scrollTop > 0) return;
+                } catch (_) {}
 
                 const t = e.touches?.[0];
                 if (!t) return;
                 const dx = t.pageX - ptrStartX.current;
                 const dy = t.pageY - ptrStartY.current;
 
-                // отсеиваем горизонтальный свайп (листание дней)
-                if (Math.abs(dx) > Math.abs(dy) * 1.1) return;
+                // требуем явную вертикальность
+                if (Math.abs(dx) > Math.abs(dy) * VERTICAL_RATIO) return;
 
-                // тянем вниз → двигаем кружок; применяем «резинку» ближе к PULL_MAX
                 if (dy > 0) {
-                    const k = dy / PULL_MAX;
-                    const damp = k < 1 ? dy : PULL_MAX + (dy - PULL_MAX) * 0.25; // rubber-band после MAX
+                    // «мертвая зона» до первого показа кружка
+                    if (dy < PULL_SHOW) { setPullPx(0); return; }
+
+                    // считаем видимое смещение после мертвой зоны
+                    const dyEff = dy - PULL_SHOW;
+
+                    // резинка после PULL_MAX: чем дальше тянешь, тем тяжелее
+                    const damp = (dyEff <= PULL_MAX)
+                        ? dyEff
+                        : PULL_MAX + (dyEff - PULL_MAX) * 0.22;
+
                     setPullPx(Math.min(PULL_MAX + 60, damp));
                 }
             }}
@@ -188,7 +221,11 @@ export default function Sections({
                 // дотянули → фиксируем пузырёк и запускаем refresh как PTR
                 ptrOwnRefresh.current = true;
                 setPullPx(PULL_SNAP);
-                setPtrSpin(true); // ← запустить спин немедленно (не ждём flip loading)
+                setPtrSpin(true);
+
+                // зафиксировать «не раньше чем через 1s можно спрятать»
+                ptrHoldUntilRef.current = Date.now() + 1000;
+
                 requestAnimationFrame(() => {
                     onPullDownRefresh?.();
                 });
@@ -200,18 +237,31 @@ export default function Sections({
                 aria-hidden="true"
             >
                 <div className="ptr-bubble">
-                    {/* Ротатор: поворачиваем за пальцем */}
-                    <div
-                        className="ptr-rotor"
-                        style={{ transform: `rotate(${pullAngle}deg)` }}
-                    >
-                        {/* ВСТАВЛЕНА СТОРОННЯЯ SVG-ИКОНКА */}
-                        <svg className="ptr-icon-svg" viewBox="0 0 28 28" width="20" height="20" aria-hidden="true">
-                            <path fill="currentColor" d="M22,16c0,4.41-3.586,8-8,8s-8-3.59-8-8s3.586-8,8-8l2.359,0.027l-1.164,1.164l2.828,2.828
-                                L24.035,6l-6.012-6l-2.828,2.828L16.375,4H14C7.375,4,2,9.371,2,16s5.375,12,12,12s12-5.371,12-12H22z"/>
+                {/* Ротор крутим только пока тянем пальцем; в режиме спина он статичен */}
+                <div
+                    className="ptr-rotor"
+                    style={{ transform: ptrSpin ? undefined : `rotate(${pullAngle}deg)` }}
+                >
+                    {ptrSpin ? (
+                        // РЕЖИМ ОБНОВЛЕНИЯ: бегущая линия по кругу (без стрелки)
+                        <svg className="ptr-ring" viewBox="0 0 40 40" width="22" height="22" aria-hidden="true">
+                            <circle cx="20" cy="20" r="14" className="ptr-ring-track" />
+                            <circle cx="20" cy="20" r="14" className="ptr-ring-dash" />
                         </svg>
-                    </div>
+                    ) : (
+                        // РЕЖИМ ПЕРЕТЯГИВАНИЯ: твоя стрелка
+                        <div className="ptr-icon-wrap">
+                            <svg className="ptr-icon-svg" viewBox="0 0 28 28" width="20" height="20" aria-hidden="true"
+                            >
+                                <path fill="currentColor"
+                                    d="M22,16c0,4.41-3.586,8-8,8s-8-3.59-8-8s3.586-8,8-8l2.359,0.027l-1.164,1.164l2.828,2.828
+                                    L24.035,6l-6.012-6l-2.828,2.828L16.375,4H14C7.375,4,2,9.371,2,16s5.375,12,12,12s12-5.371,12-12H22z"
+                                />
+                            </svg>
+                        </div>
+                    )}
                 </div>
+            </div>
             </div>
 
             <Swiper
