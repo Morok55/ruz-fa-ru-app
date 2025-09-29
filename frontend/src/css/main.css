@@ -413,18 +413,10 @@ body {
     font-size: 16px; 
 }
 
-.gs-favs {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    flex: 0 0 auto;         /* не растягивается */
-}
-
 .gs-list {
     display: flex;
     flex-direction: column;
     gap: 6px;
-
     flex: 1 1 auto;         /* занимает всё оставшееся пространство */
     min-height: 0;          /* важно для корректного расчёта flex-детей */
     overflow-y: auto;       /* именно список скроллится */
@@ -433,15 +425,33 @@ body {
 
 .gs-list::-webkit-scrollbar { display: none; }
 
+/* .gs-item теперь — контейнер для двух кнопок (основная + звезда) */
 .gs-item {
-    display: flex; 
-    gap: 10px; 
-    align-items: center; 
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    /* убираем визуальные стили карточки, они переедут в .gs-item-main */
+    background: transparent;
+    border: 0;
+    padding: 0;
+    min-width: 0;
+}
+
+/* основная кнопка результата — внешний вид как у старой .gs-item */
+.gs-item-main {
+    flex: 1 1 auto;
+    min-width: 0;
+
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
     padding: 10px 12px;
-    background: var(--surface); 
+    background: var(--surface);
     border: 1px solid var(--divider);
-    border-radius: 12px; 
-    cursor: pointer; 
+    border-radius: 12px;
+
+    cursor: pointer;
     text-align: left;
     color: var(--muted);
     font-size: 14px;
@@ -451,22 +461,138 @@ body {
     -webkit-touch-callout: none;
     user-select: none;
 }
-
-.gs-item:focus {
-    outline: none;
-}
-
-.gs-item:active {
-    opacity: 0.7;
-}
+.gs-item-main:focus { outline: none; }
+.gs-item-main:active { opacity: 0.7; }
 
 .gs-item-ico {
-    opacity: .8;
+    opacity: 0.8;
     color: var(--accent);
     transform: translateY(2px);
 }
+
+.gs-item-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Кнопка «звезда» справа от карточки */
+.gs-item-star {
+    flex: 0 0 auto;
+
+    display: grid;
+    place-items: center;
+
+    width: 40px;
+    border-radius: 12px;
+
+    background: var(--surface);
+    border: 1px solid var(--divider);
+    color: #c9c9c9;
+
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.gs-item-star:is(:hover, :focus-visible) { filter: brightness(1.06); }
+.gs-item-star:active { transform: translateY(1px); }
+.gs-item-star.is-on { color: #F4C430; } /* жёлтая звезда, когда в избранном */
+
+/* === Избранные === */
+
+/* Избранные: ограничиваем высоту и включаем внутренний скролл */
+.gs-favs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 0 0 auto;
+
+    /* ключевые строки */
+    max-height: 20vh;                 /* ↑ можно подстроить (например, 35vh/300px) */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch; /* плавный скролл на iOS */
+    
+    /* чтобы содержимое могло сжиматься и появлялось троеточие у текста */
+    min-height: 0;
+}
+
+.gs-favs::-webkit-scrollbar {
+    display: none;
+}
+
+/* контейнер одного элемента «избранное» (чип + крестик удаления) */
+.gs-fav {
+    position: relative;
+    display: flex;
+    align-items: center;
+    max-width: 100%;
+}
+
+/* чип избранной группы (нажатие выбирает группу) */
+.gs-fav-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+
+    min-width: 0;
+    max-width: calc(100% - 32px);
+    padding: 8px 12px;
+
+    background: var(--surface);
+    border: 1px solid var(--divider);
+    border-radius: 9999px;
+
+    color: var(--muted);
+    font-size: 14px;
+    cursor: pointer;
+
+    -webkit-tap-highlight-color: transparent;
+}
+.gs-fav-ico { font-size: 16px; opacity: .9; color: var(--accent); }
+
+.gs-fav-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* маленькая кнопка удаления на чипе */
+.gs-fav-del {
+    margin-left: 8px;
+    flex: 0 0 auto;
+
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+
+    /* Чёткая центровка иконки */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    /* Никаких внутренних сдвигов */
+    padding: 0;
+    line-height: 0;
+
+    background: var(--card);
+    border: 1px solid var(--divider);
+    color: var(--muted);
+    cursor: pointer;
+}
+
+/* У react-icons svg по умолчанию "сидит" на базовой линии — фиксируем */
+.gs-fav-del svg {
+    display: block;
+    width: 14px;
+    height: 14px;
+    /* при необходимости микро-нудж по оси X (сними комментарий, если нужно)
+    transform: translateX(-0.25px);
+    */
+}
+
+.gs-fav-del:active { opacity: 0.7;; }
+
 .gs-empty { 
-    opacity: .6; 
+    opacity: 0.6; 
     padding: 8px 4px; 
 }
 
