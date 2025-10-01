@@ -241,7 +241,6 @@ export default function App() {
         // const { id, label: lbl } = await resolveGroupCached(termKey);
         const termKey = termOverride ?? term;
         if (!termKey) return;
-        setLoading(true); // ← подняли вверх, чтобы DaySection сразу показал лоадер
         const { id, label: lbl } = await resolveGroupCached(termKey);
         setLabel(lbl);
 
@@ -266,6 +265,9 @@ export default function App() {
         if (!force && isPastWeek && cached?.byDate) {
             return { id, cacheKey, from: "ls-past" };
         }
+
+        // только здесь показываем загрузку
+        setLoading(true);
 
         // 4) защита от параллельных запросов одной и той же недели
         if (inflightRef.current.has(cacheKey)) {
@@ -346,7 +348,7 @@ export default function App() {
                 setLoading(false);
             }
         })();
-
+        // setLoading(true);
         inflightRef.current.set(cacheKey, p);
         return p;
     }
