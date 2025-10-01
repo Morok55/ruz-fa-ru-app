@@ -266,9 +266,6 @@ export default function App() {
             return { id, cacheKey, from: "ls-past" };
         }
 
-        // только здесь показываем загрузку
-        setLoading(true);
-
         // 4) защита от параллельных запросов одной и той же недели
         if (inflightRef.current.has(cacheKey)) {
             return inflightRef.current.get(cacheKey);
@@ -348,7 +345,7 @@ export default function App() {
                 setLoading(false);
             }
         })();
-        // setLoading(true);
+        setLoading(true);
         inflightRef.current.set(cacheKey, p);
         return p;
     }
