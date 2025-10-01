@@ -391,11 +391,17 @@ body {
 .gs-input {
     flex: 1; 
     padding: 10px 12px;
-    border: 1px solid var(--divider); 
+    border: 2px solid var(--divider); 
     border-radius: 10px;
     background: var(--card); 
     color: var(--text);
     font-size: 14px;
+}
+
+.gs-input:focus {
+    outline: none;
+    border-color: rgba(30, 190, 199, 0.8);
+    /* box-shadow: 0 0 0 2px rgba(30,191,199,0.35); */
 }
 
 .gs-cancel { 
@@ -405,6 +411,10 @@ body {
     border-radius: 10px; 
     color: var(--text); 
     font-size: 14px;
+}
+
+.gs-cancel:active {
+    opacity: 0.7;
 }
 
 .gs-section { 

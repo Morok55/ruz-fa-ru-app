@@ -213,6 +213,15 @@ export default function App() {
         swipeHandlersRef.current?.end?.(committed, dir);
     }, []);
 
+    useEffect(() => {
+        const lbl = localStorage.getItem("lastGroup");
+        const idRaw = localStorage.getItem("lastGroupId");
+        if (lbl && idRaw && !groupCacheRef.current.has(lbl)) {
+            const id = isNaN(Number(idRaw)) ? idRaw : Number(idRaw);
+            groupCacheRef.current.set(lbl, { id, label: lbl });
+        }
+    }, []);
+
     async function resolveGroupCached(termStr) {
         const hit = groupCacheRef.current.get(termStr);
         if (hit) return hit;
@@ -226,9 +235,14 @@ export default function App() {
         return val;
     }
 
-    async function loadWeekCached({ force = false, weekStartDate = anchorDate, applyToView = false } = {}) {
-        // 1) узнаём id группы
-        const { id, label: lbl } = await resolveGroupCached(term);
+    async function loadWeekCached({ force = false, weekStartDate = anchorDate, applyToView = false, termOverride = null } = {}) {
+        // // 1) узнаём id группы (используем override, если передан)
+        // const termKey = termOverride ?? term;
+        // const { id, label: lbl } = await resolveGroupCached(termKey);
+        const termKey = termOverride ?? term;
+        if (!termKey) return;
+        setLoading(true); // ← подняли вверх, чтобы DaySection сразу показал лоадер
+        const { id, label: lbl } = await resolveGroupCached(termKey);
         setLabel(lbl);
 
         const wkKey = weekKeyOf(weekStartDate);
@@ -333,7 +347,6 @@ export default function App() {
             }
         })();
 
-        setLoading(true);
         inflightRef.current.set(cacheKey, p);
         return p;
     }
@@ -511,12 +524,26 @@ export default function App() {
                 open={searchOpen}
                 onClose={() => setSearchOpen(false)}
                 onPick={async (g) => {
-                    // выбор группы из подсказок — закрываем модалку,
-                    // обновляем term и грузим неделю
-                    setTerm(g.label);
+                    // 1) оптимистично чистим экран от старой группы
+                    setByDate({});
+                    setLabel(g.label);
+
+                    // 2) фиксируем выбор
                     localStorage.setItem("lastGroup", g.label);
+                    localStorage.setItem("lastGroupId", String(g.id));
+
                     groupCacheRef.current.set(g.label, { id: g.id, label: g.label }); // быстрый кэш
-                    await loadWeekCached({ force: true, weekStartDate: anchorDate, applyToView: true });
+                    setTerm(g.label);
+
+                    // 3) СРАЗУ грузим неделю именно для выбранной группы
+                    await loadWeekCached({
+                        termOverride: g.label,
+                        force: true,
+                        weekStartDate: anchorDate,
+                        applyToView: true
+                    });
+
+                    // 4) сохранить выбранный день в пределах той же позиции недели
                     setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
                 }}
             />
