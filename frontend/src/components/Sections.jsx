@@ -27,26 +27,27 @@ export default function Sections({
     const lastIndexRef = useRef(0);       // последний известный индекс (для определения направления)
     const touchStartIndexRef = useRef(0); // индекс в момент касания (для отмены свайпа)
 
+    const ptrDayRef = useRef(null);
+
     // PTR (pull-to-refresh)
     const ptrStartX = useRef(0);
     const ptrStartY = useRef(0);
     const ptrActive = useRef(false);
-    const [pullPx, setPullPx] = useState(0);     // текущий сдвиг кружка
-    const [ptrAnimate, setPtrAnimate] = useState(false); // включить transition на отпускании
-    const [ptrSpin, setPtrSpin] = useState(false); // крутить иконку (только для PTR)
+    const [pullPx, setPullPx] = useState(0);
+    const [ptrAnimate, setPtrAnimate] = useState(false);
+    const [ptrSpin, setPtrSpin] = useState(false);
     const pullPxRef = useRef(0);
     useEffect(() => { pullPxRef.current = pullPx; }, [pullPx]);
 
     // настройки жеста
-    // сколько нужно «утащить», чтобы вообще ПОКАЗАТЬ кружок (до этого он скрыт)
-    const PULL_SHOW = 50;          // px видимого смещения до первого показа
-    // сколько нужно утащить ПОСЛЕ показа, чтобы сработал refresh (сложнее вытащить)
-    const PULL_TRIGGER = 70;       // px видимого смещения до триггера
-    // максимальное видимое смещение (дальше — резинка)
-    const PULL_MAX = 95;          // px
-    const PULL_SNAP = 44;          // фиксация пузырька при refresh
-    const VERTICAL_RATIO = 3;    // насколько жест должен быть «вертикальным»
-    const pullAngle = (Math.min(1, pullPx / PULL_MAX) * 300);     // угол поворота по ходу жеста (0..-300deg)
+    const PULL_SHOW = 50;
+    const PULL_SPEED = 0.6; // 0.5–0.8 идеальные
+    const PULL_TRIGGER = 70;
+    const PULL_MAX = 95;
+    const PULL_SNAP = 44;
+    const VERTICAL_RATIO = 3;
+    const GESTURE_LOCK_DISTANCE = 8; // px — после этого решаем, вертикальный или горизонтальный
+    const pullAngle = (Math.min(1, pullPx / PULL_MAX) * 300);
     // минимум 1 секунда удержания кружка после успешного PTR
     const ptrHoldUntilRef = useRef(0);
     const ptrHoldTimerRef = useRef(null);
@@ -56,6 +57,9 @@ export default function Sections({
 
     // PTR разрешён только если активный день прокручен к началу (scrollTop === 0)
     const ptrAllowedRef = useRef(false);
+
+    // режим текущего жеста: null | "ptr" | "scroll"
+    const gestureLockRef = useRef(null);
 
     // понадобится ref на корневой контейнер, чтобы искать активный день
     const containerRef = useRef(null);
@@ -140,65 +144,96 @@ export default function Sections({
             ref={containerRef}
             className="sections-swiper"
             onTouchStart={(e) => {
-                if (refreshing) return; // пока грузимся — не стартуем новый жест
+                if (refreshing) return;
                 const t = e.touches?.[0];
                 if (!t) return;
 
                 // проверяем: активный день прокручен в самый верх?
                 let atTop = false;
+                let activeDay = null;
                 try {
                     const root = containerRef.current;
-                    const activeDay = root?.querySelector(".swiper-slide-active .day-section");
+                    activeDay = root?.querySelector(".swiper-slide-active .day-section"); // 🔹
                     atTop = !!activeDay && (activeDay.scrollTop <= 0);
                 } catch (_) { /* no-op */ }
+
                 ptrAllowedRef.current = atTop;
+                ptrDayRef.current = atTop ? activeDay : null;
 
                 ptrStartX.current = t.pageX;
                 ptrStartY.current = t.pageY;
                 ptrActive.current = true;
                 ptrOwnRefresh.current = false;
-                setPtrAnimate(false);   // во время перетягивания — без transition
+                gestureLockRef.current = null;
+                setPtrAnimate(false);
                 setPullPx(0);
             }}
             onTouchMove={(e) => {
                 if (!ptrActive.current || refreshing) return;
-                if (!ptrAllowedRef.current) return;
-
-                // если в процессе пользователь всё-таки проскроллил контент — PTR отменяем
-                try {
-                    const root = containerRef.current;
-                    const activeDay = root?.querySelector(".swiper-slide-active .day-section");
-                    if (activeDay && activeDay.scrollTop > 0) return;
-                } catch (_) {}
 
                 const t = e.touches?.[0];
                 if (!t) return;
+
                 const dx = t.pageX - ptrStartX.current;
                 const dy = t.pageY - ptrStartY.current;
+                const adx = Math.abs(dx);
+                const ady = Math.abs(dy);
 
-                // требуем явную вертикальность
-                if (Math.abs(dx) > Math.abs(dy) * VERTICAL_RATIO) return;
+                // если ещё не выбрали режим жеста — делаем это на первом заметном смещении
+                if (!gestureLockRef.current) {
+                    // пока движения почти нет — ни PTR, ни блокирование
+                    if (adx < GESTURE_LOCK_DISTANCE && ady < GESTURE_LOCK_DISTANCE) return;
+
+                    // достаточно вертикально → считаем жест PTR'ом
+                    if (ady > adx * VERTICAL_RATIO) {
+                        gestureLockRef.current = "ptr";
+                    } else {
+                        // всё остальное — горизонтальный/диагональный свайп
+                        gestureLockRef.current = "scroll";
+                        // окончательно выключаем PTR для этого жеста
+                        ptrActive.current = false;
+                        ptrAllowedRef.current = false;
+                        setPullPx(0);
+                        setPtrSpin(false);
+                        return;
+                    }
+                }
+
+                // если жест залочен как не-PTR — дальше не вмешиваемся
+                if (gestureLockRef.current !== "ptr") return;
+                if (!ptrAllowedRef.current) return;
+
+                // ❗ блок с scrollTop УДАЛЯЕМ, его быть не должно
+                // if (ptrDayRef.current) {
+                //     ptrDayRef.current.scrollTop = 0;
+                // }
+
+                // гасим нативный скролл, раз это жест PTR
+                if (e.cancelable) e.preventDefault();
 
                 if (dy > 0) {
-                    // «мертвая зона» до первого показа кружка
                     if (dy < PULL_SHOW) { setPullPx(0); return; }
 
-                    // считаем видимое смещение после мертвой зоны
-                    const dyEff = dy - PULL_SHOW;
+                    const dyEff = (dy - PULL_SHOW) * PULL_SPEED;
 
-                    // резинка после PULL_MAX: чем дальше тянешь, тем тяжелее
                     const damp = (dyEff <= PULL_MAX)
                         ? dyEff
-                        : PULL_MAX + (dyEff - PULL_MAX) * 0.22;
+                        : PULL_MAX + (dyEff - PULL_MAX) * 0.15;
 
                     setPullPx(Math.min(PULL_MAX + 60, damp));
+                } else {
+                    // палец пошёл выше точки старта — уезжаем назад
+                    setPullPx(0);
                 }
             }}
             onTouchEnd={() => {
-                if (!ptrActive.current) return;
+                if (!ptrActive.current) {
+                    gestureLockRef.current = null; // жест был не PTR — просто очищаем
+                    return;
+                }
                 ptrActive.current = false;
+                gestureLockRef.current = null;
 
-                // если список не был вверху — это обычный скролл, PTR не трогаем
                 if (!ptrAllowedRef.current) {
                     setPtrAnimate(false);
                     setPullPx(0);
@@ -208,22 +243,18 @@ export default function Sections({
 
                 setPtrAnimate(true);
 
-                // берём актуальное значение потяга
                 const pulled = pullPxRef.current;
 
-                // не дотянули — аккуратно спрятать
                 if (pulled < PULL_TRIGGER || refreshing) {
                     setPullPx(0);
                     setPtrSpin(false);
                     return;
                 }
 
-                // дотянули → фиксируем пузырёк и запускаем refresh как PTR
                 ptrOwnRefresh.current = true;
                 setPullPx(PULL_SNAP);
                 setPtrSpin(true);
 
-                // зафиксировать «не раньше чем через 1s можно спрятать»
                 ptrHoldUntilRef.current = Date.now() + 1000;
 
                 requestAnimationFrame(() => {
@@ -237,31 +268,31 @@ export default function Sections({
                 aria-hidden="true"
             >
                 <div className="ptr-bubble">
-                {/* Ротор крутим только пока тянем пальцем; в режиме спина он статичен */}
-                <div
-                    className="ptr-rotor"
-                    style={{ transform: ptrSpin ? undefined : `rotate(${pullAngle}deg)` }}
-                >
-                    {ptrSpin ? (
-                        // РЕЖИМ ОБНОВЛЕНИЯ: бегущая линия по кругу (без стрелки)
-                        <svg className="ptr-ring" viewBox="0 0 40 40" width="22" height="22" aria-hidden="true">
-                            <circle cx="20" cy="20" r="14" className="ptr-ring-track" />
-                            <circle cx="20" cy="20" r="14" className="ptr-ring-dash" />
-                        </svg>
-                    ) : (
-                        // РЕЖИМ ПЕРЕТЯГИВАНИЯ: твоя стрелка
-                        <div className="ptr-icon-wrap">
-                            <svg className="ptr-icon-svg" viewBox="0 0 28 28" width="20" height="20" aria-hidden="true"
-                            >
-                                <path fill="currentColor"
-                                    d="M22,16c0,4.41-3.586,8-8,8s-8-3.59-8-8s3.586-8,8-8l2.359,0.027l-1.164,1.164l2.828,2.828
-                                    L24.035,6l-6.012-6l-2.828,2.828L16.375,4H14C7.375,4,2,9.371,2,16s5.375,12,12,12s12-5.371,12-12H22z"
-                                />
+                    {/* Ротор крутим только пока тянем пальцем; в режиме спина он статичен */}
+                    <div
+                        className="ptr-rotor"
+                        style={{ transform: ptrSpin ? undefined : `rotate(${pullAngle}deg)` }}
+                    >
+                        {ptrSpin ? (
+                            // РЕЖИМ ОБНОВЛЕНИЯ: бегущая линия по кругу (без стрелки)
+                            <svg className="ptr-ring" viewBox="0 0 40 40" width="22" height="22" aria-hidden="true">
+                                <circle cx="20" cy="20" r="14" className="ptr-ring-track" />
+                                <circle cx="20" cy="20" r="14" className="ptr-ring-dash" />
                             </svg>
-                        </div>
-                    )}
+                        ) : (
+                            // РЕЖИМ ПЕРЕТЯГИВАНИЯ: твоя стрелка
+                            <div className="ptr-icon-wrap">
+                                <svg className="ptr-icon-svg" viewBox="0 0 28 28" width="20" height="20" aria-hidden="true"
+                                >
+                                    <path fill="currentColor"
+                                        d="M22,16c0,4.41-3.586,8-8,8s-8-3.59-8-8s3.586-8,8-8l2.359,0.027l-1.164,1.164l2.828,2.828
+                                        L24.035,6l-6.012-6l-2.828,2.828L16.375,4H14C7.375,4,2,9.371,2,16s5.375,12,12,12s12-5.371,12-12H22z"
+                                    />
+                                </svg>
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </div>
             </div>
 
             <Swiper

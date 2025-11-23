@@ -4,3 +4,4 @@ __pycache__/
 /telegram_bot
 /ruz_user_ids.json
 *.pyc
+/test

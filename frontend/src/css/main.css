@@ -225,6 +225,7 @@ body {
 }
 
 .day-section {
+    position: relative;
     flex: 1 1 auto;
     min-height: 0;                 /* критично для скролла во flex-родителе */
     overflow-y: auto;              /* скроллим ТОЛЬКО здесь */
@@ -243,6 +244,10 @@ body {
     margin: 0 0 16px;
     font-size: 18px;
     font-weight: 600;
+
+    position: relative;
+    z-index: 10;          /* выше, чем .ptr */
+    background: var(--bg);/* перекрывает кружок сверху */
 }
 
 /* Карточка пары */
@@ -631,7 +636,7 @@ body {
     pointer-events: none;
     opacity: 0;
     transform: translateY(0);
-    z-index: 5;
+    z-index: 2;
 }
 
 .ptr.is-visible,
