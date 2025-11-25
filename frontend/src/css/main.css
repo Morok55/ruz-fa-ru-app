@@ -264,9 +264,9 @@ body {
 /* Текущая пара (по времени) */
 .card--current {
     border-color: var(--accent);
-    box-shadow:
+    /* box-shadow:
         0 0 0 1px rgba(30,191,199,0.5),
-        0 0 18px rgba(30,191,199,0.35);
+        0 0 18px rgba(30,191,199,0.35); */
 }
 
 /* Бейдж "СЕЙЧАС" в углу */

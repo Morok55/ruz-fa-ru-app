@@ -149,21 +149,23 @@ export default function Sections({
         const dy = t.pageY - ptrStartY.current;
         const adx = Math.abs(dx);
         const ady = Math.abs(dy);
+        const isDown = dy > 0; // 👈 двигаем палец вниз?
 
         // если ещё не выбрали режим жеста — делаем это на первом заметном смещении
         if (!gestureLockRef.current) {
             // пока движения почти нет — ни PTR, ни блокирование
             if (adx < GESTURE_LOCK_DISTANCE && ady < GESTURE_LOCK_DISTANCE) return;
 
-            // достаточно вертикально → считаем жест PTR'ом
-            if (ady > adx * VERTICAL_RATIO) {
+            // 👇 PTR только если:
+            //  - тянем ВНИЗ
+            //  - реально в самом верху (ptrAllowedRef.current === true)
+            //  - жест достаточно вертикальный
+            if (isDown && ptrAllowedRef.current && ady > adx * VERTICAL_RATIO) {
                 gestureLockRef.current = "ptr";
             } else {
-                // всё остальное — горизонтальный/диагональный свайп
+                // всё остальное — обычный скролл/свайп
                 gestureLockRef.current = "scroll";
-                // окончательно выключаем PTR для этого жеста
                 ptrActive.current = false;
-                ptrAllowedRef.current = false;
                 setPullPx(0);
                 setPtrSpin(false);
                 return;
@@ -188,7 +190,7 @@ export default function Sections({
 
             setPullPx(Math.min(PULL_MAX + 60, damp));
         } else {
-            // палец пошёл выше точки старта — уезжаем назад
+            // палец пошёл вверх после уже начатого PTR — просто закрываем пузырёк
             setPullPx(0);
         }
     };
