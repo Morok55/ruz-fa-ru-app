@@ -51,6 +51,13 @@ function weekKeyOf(date) {
     return isoKey(w);
 }
 
+function isSameDay(a, b) {
+    return a && b &&
+        a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate();
+}
+
 // Возвращает понедельник от выбранной пользователем даты (видимая неделя)
 function getVisibleWeekStart(date) {
     return startOfWeek(date || new Date());
@@ -89,7 +96,7 @@ function mergeDayLessons(arr) {
         }
         const item = byKey.get(key);
 
-        const teacher = (l.lecturer || l.lecturer_name || "").trim();
+        const teacher = (l.lecturer_title || l.lecturer_name || "").trim();
         const room = (l.auditorium || l.room || "").trim();
 
         // добавляем уникальные комбинации teacher+room
@@ -175,6 +182,7 @@ export default function App() {
     const [loading, setLoading] = useState(false);
     const [byDate, setByDate] = useState({});        // { "YYYY-MM-DD": Lesson[] }
     const [label, setLabel] = useState("");
+    const [now, setNow] = useState(() => new Date());
     // триггер для перерисовки, когда обновляем RAM-кэш недель
     const [cacheTick, setCacheTick] = useState(0);
 
@@ -222,6 +230,13 @@ export default function App() {
         }
     }, []);
 
+    useEffect(() => {
+        const id = setInterval(() => {
+            setNow(new Date());
+        }, 60_000); // раз в минуту достаточно
+        return () => clearInterval(id);
+    }, []);
+
     async function resolveGroupCached(termStr) {
         const hit = groupCacheRef.current.get(termStr);
         if (hit) return hit;
@@ -237,8 +252,6 @@ export default function App() {
 
     async function loadWeekCached({ force = false, weekStartDate = anchorDate, applyToView = false, termOverride = null } = {}) {
         // // 1) узнаём id группы (используем override, если передан)
-        // const termKey = termOverride ?? term;
-        // const { id, label: lbl } = await resolveGroupCached(termKey);
         const termKey = termOverride ?? term;
         if (!termKey) return;
         const { id, label: lbl } = await resolveGroupCached(termKey);
@@ -552,19 +565,25 @@ export default function App() {
                 onSelectDay={(d) => showDay(d)}
                 onPrevDay={() => showDay(addDays(selectedDate, -1))}    // fallback (можно оставить)
                 onNextDay={() => showDay(addDays(selectedDate,  1))}    // fallback (можно оставить)
-                renderDay={(d) => (
-                    <DaySection
-                        date={d}
-                        lessons={getLessonsFor(d)}
-                        // лоадер показываем, когда:
-                        // 1) идёт загрузка текущей (якорной) недели — глобальный loading === true;
-                        // 2) идёт точечная загрузка нужной недели (inflightRef) — isLoadingFor(d) === true.
-                        loading={
-                            (loading && startOfWeek(d).getTime() === startOfWeek(anchorDate).getTime())
-                            || isLoadingFor(d)
-                        }
-                    />
-                )}
+                renderDay={(d) => {
+                    const isToday = isSameDay(d, now);
+                    const nowMinutes = isToday ? (now.getHours() * 60 + now.getMinutes()) : null;
+
+                    return (
+                        <DaySection
+                            date={d}
+                            lessons={getLessonsFor(d)}
+                            // лоадер показываем, когда:
+                            // 1) идёт загрузка текущей (якорной) недели — глобальный loading === true;
+                            // 2) идёт точечная загрузка нужной недели (inflightRef) — isLoadingFor(d) === true.
+                            loading={
+                                (loading && startOfWeek(d).getTime() === startOfWeek(anchorDate).getTime())
+                                || isLoadingFor(d)
+                            }
+                            nowMinutes={nowMinutes}
+                        />
+                    );
+                }}
                 onSwipeStart={onSwipeStart}
                 onSwipeMove={onSwipeMove}
                 onSwipeEnd={onSwipeEnd}

@@ -40,10 +40,10 @@ export default function Sections({
     useEffect(() => { pullPxRef.current = pullPx; }, [pullPx]);
 
     // настройки жеста
-    const PULL_SHOW = 50;
+    const PULL_SHOW = 40;
     const PULL_SPEED = 0.6; // 0.5–0.8 идеальные
-    const PULL_TRIGGER = 70;
-    const PULL_MAX = 95;
+    const PULL_TRIGGER = 60;
+    const PULL_MAX = 85;
     const PULL_SNAP = 44;
     const VERTICAL_RATIO = 3;
     const GESTURE_LOCK_DISTANCE = 8; // px — после этого решаем, вертикальный или горизонтальный
@@ -139,6 +139,74 @@ export default function Sections({
         }
     }, [refreshing]);
 
+    const handlePtrTouchMove = (e) => {
+        if (!ptrActive.current || refreshing) return;
+
+        const t = e.touches?.[0];
+        if (!t) return;
+
+        const dx = t.pageX - ptrStartX.current;
+        const dy = t.pageY - ptrStartY.current;
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+
+        // если ещё не выбрали режим жеста — делаем это на первом заметном смещении
+        if (!gestureLockRef.current) {
+            // пока движения почти нет — ни PTR, ни блокирование
+            if (adx < GESTURE_LOCK_DISTANCE && ady < GESTURE_LOCK_DISTANCE) return;
+
+            // достаточно вертикально → считаем жест PTR'ом
+            if (ady > adx * VERTICAL_RATIO) {
+                gestureLockRef.current = "ptr";
+            } else {
+                // всё остальное — горизонтальный/диагональный свайп
+                gestureLockRef.current = "scroll";
+                // окончательно выключаем PTR для этого жеста
+                ptrActive.current = false;
+                ptrAllowedRef.current = false;
+                setPullPx(0);
+                setPtrSpin(false);
+                return;
+            }
+        }
+
+        // если жест залочен как не-PTR — дальше не вмешиваемся
+        if (gestureLockRef.current !== "ptr") return;
+        if (!ptrAllowedRef.current) return;
+
+        // здесь нам ВАЖНО уметь отменять дефолт — для этого мы и делаем passive:false
+        if (e.cancelable) e.preventDefault();
+
+        if (dy > 0) {
+            if (dy < PULL_SHOW) { setPullPx(0); return; }
+
+            const dyEff = (dy - PULL_SHOW) * PULL_SPEED;
+
+            const damp = (dyEff <= PULL_MAX)
+                ? dyEff
+                : PULL_MAX + (dyEff - PULL_MAX) * 0.15;
+
+            setPullPx(Math.min(PULL_MAX + 60, damp));
+        } else {
+            // палец пошёл выше точки старта — уезжаем назад
+            setPullPx(0);
+        }
+    };
+
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+
+        const handler = (ev) => handlePtrTouchMove(ev);
+
+        // ключевая часть: passive: false → можно вызывать preventDefault без варнинга
+        el.addEventListener("touchmove", handler, { passive: false });
+
+        return () => {
+            el.removeEventListener("touchmove", handler);
+        };
+    }, []); // зависимости не нужны, используем только ref'ы и константы
+
     return (
         <main
             ref={containerRef}
@@ -167,64 +235,6 @@ export default function Sections({
                 gestureLockRef.current = null;
                 setPtrAnimate(false);
                 setPullPx(0);
-            }}
-            onTouchMove={(e) => {
-                if (!ptrActive.current || refreshing) return;
-
-                const t = e.touches?.[0];
-                if (!t) return;
-
-                const dx = t.pageX - ptrStartX.current;
-                const dy = t.pageY - ptrStartY.current;
-                const adx = Math.abs(dx);
-                const ady = Math.abs(dy);
-
-                // если ещё не выбрали режим жеста — делаем это на первом заметном смещении
-                if (!gestureLockRef.current) {
-                    // пока движения почти нет — ни PTR, ни блокирование
-                    if (adx < GESTURE_LOCK_DISTANCE && ady < GESTURE_LOCK_DISTANCE) return;
-
-                    // достаточно вертикально → считаем жест PTR'ом
-                    if (ady > adx * VERTICAL_RATIO) {
-                        gestureLockRef.current = "ptr";
-                    } else {
-                        // всё остальное — горизонтальный/диагональный свайп
-                        gestureLockRef.current = "scroll";
-                        // окончательно выключаем PTR для этого жеста
-                        ptrActive.current = false;
-                        ptrAllowedRef.current = false;
-                        setPullPx(0);
-                        setPtrSpin(false);
-                        return;
-                    }
-                }
-
-                // если жест залочен как не-PTR — дальше не вмешиваемся
-                if (gestureLockRef.current !== "ptr") return;
-                if (!ptrAllowedRef.current) return;
-
-                // ❗ блок с scrollTop УДАЛЯЕМ, его быть не должно
-                // if (ptrDayRef.current) {
-                //     ptrDayRef.current.scrollTop = 0;
-                // }
-
-                // гасим нативный скролл, раз это жест PTR
-                if (e.cancelable) e.preventDefault();
-
-                if (dy > 0) {
-                    if (dy < PULL_SHOW) { setPullPx(0); return; }
-
-                    const dyEff = (dy - PULL_SHOW) * PULL_SPEED;
-
-                    const damp = (dyEff <= PULL_MAX)
-                        ? dyEff
-                        : PULL_MAX + (dyEff - PULL_MAX) * 0.15;
-
-                    setPullPx(Math.min(PULL_MAX + 60, damp));
-                } else {
-                    // палец пошёл выше точки старта — уезжаем назад
-                    setPullPx(0);
-                }
             }}
             onTouchEnd={() => {
                 if (!ptrActive.current) {
