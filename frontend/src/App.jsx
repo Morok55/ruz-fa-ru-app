@@ -471,11 +471,10 @@ export default function App() {
 
     useEffect(() => {
         if (!term) return;
-        (async () => {
-            await loadWeekCached({ weekStartDate: anchorDate });
-        })();
+        const vs = getVisibleWeekStart(selectedDate);
+        loadWeekCached({ weekStartDate: vs, applyToView: true }).catch(() => {});
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [term]);
+    }, [term, getVisibleWeekKey(selectedDate)]);
 
     useEffect(() => {
         function revalidate() {
@@ -492,12 +491,6 @@ export default function App() {
             window.removeEventListener("visibilitychange", onVis);
         };
     }, [anchorDate, term]);
-
-    useEffect(() => {
-        const vs = getVisibleWeekStart(selectedDate);
-        loadWeekCached({ weekStartDate: vs, applyToView: true }).catch(() => {});
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [getVisibleWeekKey(selectedDate)]);
 
     // ---------- РЕНДЕР ----------
     const header = (
