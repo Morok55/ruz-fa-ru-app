@@ -34,6 +34,7 @@ body {
     display: flex;
     flex-direction: column; /* сверху вниз */
     min-height: 0;          /* важно для корректного расчёта flex-детей */
+    overflow-x: hidden;
 }
 
 /* верхняя панель просто статична (не sticky) */
@@ -264,14 +265,11 @@ body {
 /* Текущая пара (по времени) */
 .card--current {
     border-color: var(--accent);
-    /* box-shadow:
-        0 0 0 1px rgba(30,191,199,0.5),
-        0 0 18px rgba(30,191,199,0.35); */
 }
 
 /* Бейдж "СЕЙЧАС" в углу */
 .card--current::before {
-    content: "СЕЙЧАС";
+    content: attr(data-left);
     position: absolute;
     top: 10px;
     right: 16px;
@@ -658,7 +656,7 @@ body {
 /* Pull-to-refresh circle */
 .ptr {
     position: absolute;
-    top: 0;
+    top: -36px;
     left: 0;
     right: 0;
     display: flex;

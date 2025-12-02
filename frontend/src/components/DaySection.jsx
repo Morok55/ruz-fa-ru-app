@@ -50,17 +50,19 @@ export default function DaySection({ date, lessons, loading = false, nowMinutes 
                     const isForeign = l._isForeign ?? /иностран/i.test(l.discipline || "");
 
                     // 3) текущая пара?
+                    let minsLeft = null;
                     let isCurrent = false;
                     if (nowMinutes != null) {
                         const b = parseHMToMinutes(l.beginLesson);
                         const e = parseHMToMinutes(l.endLesson);
                         if (b != null && e != null && nowMinutes >= b && nowMinutes < e) {
                             isCurrent = true;
+                            minsLeft = e - nowMinutes;
                         }
                     }
 
                     return (
-                        <article key={idx} className={`card ${isCurrent ? "card--current" : ""}`}>
+                        <article key={idx} className={`card ${isCurrent ? "card--current" : ""}`} data-left={isCurrent && minsLeft != null ? `до конца: ${minsLeft} мин.` : ""}>
                             <div className="badge">
                                 <span className={`dot ${isSeminar ? "dot-square" : ""}`} />
                                 <span>{kindLabel}</span>

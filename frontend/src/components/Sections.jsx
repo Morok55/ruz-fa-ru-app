@@ -46,7 +46,7 @@ export default function Sections({
     const PULL_MAX = 85;
     const PULL_SNAP = 44;
     const VERTICAL_RATIO = 3;
-    const GESTURE_LOCK_DISTANCE = 8; // px — после этого решаем, вертикальный или горизонтальный
+    const GESTURE_LOCK_DISTANCE = 15; // px — после этого решаем, вертикальный или горизонтальный
     const pullAngle = (Math.min(1, pullPx / PULL_MAX) * 300);
     // минимум 1 секунда удержания кружка после успешного PTR
     const ptrHoldUntilRef = useRef(0);
@@ -267,7 +267,7 @@ export default function Sections({
                 setPullPx(PULL_SNAP);
                 setPtrSpin(true);
 
-                ptrHoldUntilRef.current = Date.now() + 1000;
+                ptrHoldUntilRef.current = Date.now() + 500;
 
                 requestAnimationFrame(() => {
                     onPullDownRefresh?.();
