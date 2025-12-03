@@ -262,6 +262,10 @@ body {
     box-shadow: 0 1px 0 rgba(0,0,0,.25);
 }
 
+.card:active {
+    opacity: 0.7;
+}
+
 /* Текущая пара (по времени) */
 .card--current {
     border-color: var(--accent);
@@ -753,4 +757,202 @@ body {
 
 @keyframes ptr-dash-move {
     to { stroke-dashoffset: -102; } /* чуть больше длины, чтобы «штрих» оббегал круг */
+}
+
+/* === Модальное окно (снизу) с преподавателем === */
+
+.teacher-sheet-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 60;
+
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 220ms ease;
+}
+
+.teacher-sheet-overlay.is-open,
+.teacher-sheet-overlay.is-closing {
+    pointer-events: auto;
+}
+
+.teacher-sheet-overlay.is-open {
+    opacity: 1;
+}
+
+.teacher-sheet-overlay.is-closing {
+    opacity: 0;
+}
+
+.teacher-sheet {
+    width: 100%;
+    max-width: 720px;
+    background: var(--card);
+    border-radius: 18px 18px 0 0;
+    padding: 12px 18px 44px;
+    box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
+
+    transform: translateY(100%);
+    transition: transform 260ms cubic-bezier(.22,.61,.36,1);
+}
+
+.teacher-sheet-overlay.is-open .teacher-sheet {
+    transform: translateY(0);
+}
+
+.teacher-sheet-overlay.is-closing .teacher-sheet {
+    transform: translateY(100%);
+}
+
+/* маленькая "перекладинка" сверху */
+.teacher-sheet-grabber {
+    width: 40px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.24);
+    margin: 4px auto 12px;
+}
+
+.teacher-sheet-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.teacher-sheet-name {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.teacher-sheet-email {
+    font-size: 14px;
+    color: var(--muted);
+    word-break: break-all;
+}
+
+.sheet-btn {
+    margin-top: 10px;
+    width: 100%;
+    padding: 16px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--divider);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+
+    display: flex;
+    /* align-items: center;
+    justify-content: center; */
+    gap: 8px;
+}
+
+.sheet-btn:active {
+    opacity: 0.7;
+}
+
+.teacher-sheet-body {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* список преподов для иностранного */
+.teacher-sheet-foreign-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+/* карточка преподавателя */
+.teacher-row-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    padding: 10px 12px;
+    border-radius: 16px;
+    background: var(--bg);
+}
+
+.teacher-row-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.teacher-row-name {
+    font-size: 15px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.teacher-row-email {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--muted);
+    word-break: break-all;
+}
+
+.teacher-row-empty {
+    font-size: 14px;
+    color: var(--muted);
+}
+
+/* белая кнопка с иконкой копирования */
+.teacher-copy-btn {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    border: none;
+    background: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--bg);
+    font-size: 16px;
+
+    -webkit-tap-highlight-color: transparent;
+}
+
+.teacher-copy-btn:active {
+    transform: scale(0.97);
+    opacity: 0.7;
+}
+
+/* всплывающая надпись "Почта скопирована!" */
+.sheet-copy-hint {
+    position: absolute;
+    bottom: 12px;                /* можно регулировать */
+    left: 50%;
+    transform: translateX(-50%);
+    
+    background: rgba(0,0,0,0.8);
+    color: #fff;
+    padding: 10px 20px;
+    font-size: 14px;
+    border-radius: 10px;
+
+    opacity: 0;
+    pointer-events: none;
+
+    animation: sheetCopyHintFade 2s ease forwards;
+}
+
+@keyframes sheetCopyHintFade {
+    0%   { opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { opacity: 0; }
 }
