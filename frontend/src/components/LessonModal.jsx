@@ -11,6 +11,14 @@ export default function LessonModal({ lesson, onClose }) {
     const closeTimerRef = React.useRef(null);
     const copyTimerRef = React.useRef(null);
 
+    // drag state
+    const [isDragging, setIsDragging] = React.useState(false);
+    const [dragOffset, setDragOffset] = React.useState(0);
+    const dragStateRef = React.useRef({
+        startY: 0,
+        dragging: false,
+    });
+
     const hasLesson = !!lesson;
 
     // анимация открытия
@@ -18,6 +26,8 @@ export default function LessonModal({ lesson, onClose }) {
         if (hasLesson) {
             setIsSheetClosing(false);
             setCopiedEmail("");
+            setDragOffset(0);
+            setIsDragging(false);
             if (copyTimerRef.current) {
                 clearTimeout(copyTimerRef.current);
                 copyTimerRef.current = null;
@@ -27,6 +37,8 @@ export default function LessonModal({ lesson, onClose }) {
             setIsSheetOpen(false);
             setIsSheetClosing(false);
             setCopiedEmail("");
+            setDragOffset(0);
+            setIsDragging(false);
         }
     }, [hasLesson]);
 
@@ -41,6 +53,9 @@ export default function LessonModal({ lesson, onClose }) {
     const startClose = () => {
         if (!hasLesson || isSheetClosing) return;
         setIsSheetClosing(true);
+        setIsDragging(false);
+        setDragOffset(0);
+
         if (closeTimerRef.current) {
             clearTimeout(closeTimerRef.current);
         }
@@ -79,12 +94,64 @@ export default function LessonModal({ lesson, onClose }) {
         }, 2000);
     };
 
+    // TOUCH-обработчики для свайпа вниз
+    const onTouchStart = (e) => {
+        if (!hasLesson) return;
+        const touch = e.touches[0];
+        dragStateRef.current.startY = touch.clientY;
+        dragStateRef.current.dragging = true;
+        setIsDragging(true);
+        setDragOffset(0);
+    };
+
+    const onTouchMove = (e) => {
+        if (!dragStateRef.current.dragging) return;
+        const touch = e.touches[0];
+        const delta = touch.clientY - dragStateRef.current.startY;
+        if (delta <= 0) {
+            setDragOffset(0);
+        } else {
+            setDragOffset(delta);
+        }
+    };
+
+    const finishDrag = () => {
+        if (!dragStateRef.current.dragging) return;
+        dragStateRef.current.dragging = false;
+
+        const threshold = 80; // пикселей, после которых считаем жест закрытием
+        if (dragOffset > threshold) {
+            // тянули достаточно — закрываем
+            startClose();
+        } else {
+            // мало тянули — возвращаем обратно
+            setIsDragging(false);
+            setDragOffset(0);
+        }
+    };
+
+    const onTouchEnd = () => {
+        finishDrag();
+    };
+
+    const onTouchCancel = () => {
+        finishDrag();
+    };
+
     if (!lesson) return null;
 
     const isForeign = lesson._isForeign ?? /иностран/i.test(lesson.discipline || "");
     const overlayClass = `teacher-sheet-overlay ${
         isSheetClosing ? "is-closing" : (isSheetOpen ? "is-open" : "")
     }`;
+
+    // inline-стиль только во время перетаскивания:
+    const sheetStyle = isDragging
+        ? {
+            transform: `translateY(${dragOffset}px)`,
+            transition: "none",
+        }
+        : undefined;
 
     // ====== ИНОСТРАННЫЙ ЯЗЫК ======
     if (isForeign) {
@@ -117,7 +184,12 @@ export default function LessonModal({ lesson, onClose }) {
             <div className={overlayClass} onClick={startClose}>
                 <div
                     className="teacher-sheet"
+                    style={sheetStyle}
                     onClick={(e) => e.stopPropagation()}
+                    onTouchStart={onTouchStart}
+                    onTouchMove={onTouchMove}
+                    onTouchEnd={onTouchEnd}
+                    onTouchCancel={onTouchCancel}
                 >
                     <div className="teacher-sheet-grabber" />
                     <div className="teacher-sheet-body">
@@ -178,7 +250,12 @@ export default function LessonModal({ lesson, onClose }) {
         <div className={overlayClass} onClick={startClose}>
             <div
                 className="teacher-sheet"
+                style={sheetStyle}
                 onClick={(e) => e.stopPropagation()}
+                onTouchStart={onTouchStart}
+                onTouchMove={onTouchMove}
+                onTouchEnd={onTouchEnd}
+                onTouchCancel={onTouchCancel}
             >
                 <div className="teacher-sheet-grabber" />
                 <div className="teacher-sheet-body">
