@@ -377,7 +377,7 @@ export default function App() {
             // Переход в другую неделю → анимируем шапку (Swiper сам вызовет onPrevWeek/onNextWeek)
             const dir = newStart > oldStart ? "next" : "prev";
             const sw = weekSwiperRef.current;
-            if (sw) sw.slideTo(dir === "next" ? 2 : 0, 60); // 0=предыдущая, 2=следующая
+            if (sw) sw.slideTo(dir === "next" ? 2 : 0, 200); // 0=предыдущая, 2=следующая
             // loadWeekCached запустится в onPrevWeek/onNextWeek
         }
     }

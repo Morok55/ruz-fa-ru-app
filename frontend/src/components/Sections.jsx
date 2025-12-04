@@ -329,22 +329,34 @@ export default function Sections({
                 onSlideChangeTransitionStart={(sw) => {
                     const curr = sw.activeIndex ?? 0;
                     const prev = lastIndexRef.current ?? curr;
-                    const dir = curr < prev ? "prev" : (curr > prev ? "next" : undefined);
+
+                    const dir =
+                        curr < prev ? "prev" :
+                        curr > prev ? "next" :
+                        undefined;
+
+                    // 1) сообщаем WeekStrip, что свайп завершён и в какую сторону
                     if (dir) onSwipeEnd?.(true, dir);
-                }}
-                onSlideChangeTransitionEnd={(sw) => {
-                    const curr = sw.activeIndex ?? 0;
+
+                    // 2) сразу фиксируем новый индекс
                     lastIndexRef.current = curr;
 
+                    // 3) и СРАЗУ переключаем день / неделю (showDay)
                     if (Array.isArray(extendedDays) && extendedDays.length > 0) {
                         const idx = Math.max(0, Math.min(curr, extendedDays.length - 1));
                         const date = extendedDays[idx];
                         onSelectDay?.(date);
                     } else {
-                        // fallback
+                        // fallback на случай если extendedDays пустой
                         if (curr === 0) onPrevDay?.();
                         else if (curr === 2) onNextDay?.();
                     }
+                }}
+
+                // тут уже почти ничего не нужно, можно оставить только синхронизацию индекса
+                onSlideChangeTransitionEnd={(sw) => {
+                    const curr = sw.activeIndex ?? 0;
+                    lastIndexRef.current = curr;
                 }}
 
                 initialSlide={selectedIndex}
