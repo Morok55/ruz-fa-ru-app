@@ -49,8 +49,24 @@ export default function DaySection({ date, lessons, loading = false, nowMinutes 
                 lessons.map((l, idx) => {
                     const kindRaw = l.kindOfWork || l.lessonType || "Занятие";
                     const lower = String(kindRaw).toLowerCase();
+
+                    // семинар / практика — для точки
                     const isSeminar = lower.includes("семинар") || lower.includes("практичес");
-                    const kindLabel = isSeminar ? "СЕМИНАР" : toPairUpper(kindRaw);
+
+                    // дополнительные флаги для комбинированных типов
+                    const hasPlus = lower.includes("+");
+                    const hasZachet = lower.includes("зачет") || lower.includes("зачёт");
+                    const hasExam = lower.includes("экзамен");
+
+                    // "чистый" семинар / практика — без плюсов, зачётов и экзаменов
+                    const isPureSeminar = isSeminar && !hasPlus && !hasZachet && !hasExam;
+
+                    // подпись на бейдже:
+                    // - чистый семинар → "СЕМИНАР"
+                    // - всё остальное → исходная строка, но uppercase (в т.ч. "семинар+зачет")
+                    const kindLabel = isPureSeminar
+                        ? "СЕМИНАР"
+                        : toPairUpper(kindRaw);
 
                     const isForeign = l._isForeign ?? /иностран/i.test(l.discipline || "");
 
