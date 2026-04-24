@@ -50,6 +50,13 @@ function weekKeyOf(date) {
     // тот же локальный формат, что и для дней
     return isoKey(w);
 }
+function parseWeekKey(key) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key || ""));
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    d.setHours(0, 0, 0, 0);
+    return Number.isNaN(d.getTime()) ? null : d;
+}
 
 function isSameDay(a, b) {
     return a && b &&
@@ -70,14 +77,34 @@ function getVisibleWeekKey(date) {
 // --- текущая реальная неделя (первая, что видит пользователь) ---
 const CURRENT_WEEK_START = startOfWeek(new Date());
 const CURRENT_WEEK_KEY = weekKeyOf(CURRENT_WEEK_START);
+const CURRENT_WEEK_TIME = CURRENT_WEEK_START.getTime();
 
 function lsSet(key, value) {
-    localStorage.setItem(key, JSON.stringify({ t: Date.now(), v: value }));
+    try {
+        localStorage.setItem(key, JSON.stringify({ t: Date.now(), v: value }));
+    } catch (e) {
+        console.warn("Could not write schedule to localStorage:", e);
+    }
 }
 function lsPeek(key) {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    try { return JSON.parse(raw); } catch { return null; }
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+}
+function unpackStoredWeek(pack) {
+    return pack?.v ?? (pack && pack.byDate ? pack : null);
+}
+function canUsePersistentWeek(date) {
+    return startOfWeek(date).getTime() <= CURRENT_WEEK_TIME;
+}
+function readStoredWeek(cacheKey, weekStartDate) {
+    if (!canUsePersistentWeek(weekStartDate)) return null;
+    const cached = unpackStoredWeek(lsPeek(cacheKey));
+    return cached?.byDate ? cached : null;
 }
 
 function mergeDayLessons(arr) {
@@ -240,6 +267,14 @@ export default function App() {
     async function resolveGroupCached(termStr) {
         const hit = groupCacheRef.current.get(termStr);
         if (hit) return hit;
+        const lastLabel = localStorage.getItem("lastGroup");
+        const lastIdRaw = localStorage.getItem("lastGroupId");
+        if (lastLabel === termStr && lastIdRaw) {
+            const id = isNaN(Number(lastIdRaw)) ? lastIdRaw : Number(lastIdRaw);
+            const val = { id, label: lastLabel };
+            groupCacheRef.current.set(termStr, val);
+            return val;
+        }
         const options = await fetchJSON(`${API_BASE}/search?term=${encodeURIComponent(termStr)}`);
         const group = options.find((v) => /group/i.test(v.type || v.kind || v.category || "") || v.group);
         if (!group) throw new Error("Группа не найдена");
@@ -250,6 +285,39 @@ export default function App() {
         return val;
     }
 
+    function hydrateStoredPastWeeks(id) {
+        let hydrated = 0;
+        try {
+            const prefix = `${id}::`;
+            const entries = [];
+            for (let i = 0; i < localStorage.length; i += 1) {
+                const key = localStorage.key(i);
+                if (!key?.startsWith(prefix)) continue;
+
+                const weekKey = key.slice(prefix.length);
+                const weekStart = parseWeekKey(weekKey);
+                if (!weekStart || weekStart.getTime() >= CURRENT_WEEK_TIME) continue;
+
+                const cached = readStoredWeek(key, weekStart);
+                if (cached?.byDate) entries.push({ key, weekStart, cached });
+            }
+
+            entries
+                .sort((a, b) => b.weekStart.getTime() - a.weekStart.getTime())
+                .forEach(({ key, cached }) => {
+                    if (!weekCacheRef.current.has(key)) {
+                        weekCacheRef.current.set(key, { data: cached, savedAt: Date.now() });
+                        hydrated += 1;
+                    }
+                });
+        } catch (e) {
+            console.warn("Could not hydrate past weeks from localStorage:", e);
+        }
+
+        if (hydrated > 0) setCacheTick(t => t + 1);
+        return hydrated;
+    }
+
     async function loadWeekCached({ force = false, weekStartDate = anchorDate, applyToView = false, termOverride = null } = {}) {
         // // 1) узнаём id группы (используем override, если передан)
         const termKey = termOverride ?? term;
@@ -257,15 +325,15 @@ export default function App() {
         const { id, label: lbl } = await resolveGroupCached(termKey);
         setLabel(lbl);
 
-        const wkKey = weekKeyOf(weekStartDate);
+        const normalizedWeekStart = startOfWeek(weekStartDate);
+        const wkKey = weekKeyOf(normalizedWeekStart);
         const cacheKey = `${id}::${wkKey}`;
 
         const isCurrentWeek = wkKey === CURRENT_WEEK_KEY;
-        const isPastWeek = new Date(weekStartDate) < CURRENT_WEEK_START;
+        const isPastWeek = normalizedWeekStart.getTime() < CURRENT_WEEK_TIME;
 
         // 2) читаем из LocalStorage и сразу показываем, если есть
-        const pack = lsPeek(cacheKey); // { t, v } | старый формат
-        const cached = pack?.v ?? (pack && pack.byDate ? pack : null);
+        const cached = readStoredWeek(cacheKey, normalizedWeekStart);
         if (cached?.byDate) {
             weekCacheRef.current.set(cacheKey, { data: cached, savedAt: Date.now() });
             // Если надо применить к текущему экрану — рисуем немедленно
@@ -275,6 +343,10 @@ export default function App() {
         }
 
         // 3) политика "прошлые недели": если есть в LS и не force — ничего не запрашиваем
+        if (isCurrentWeek) {
+            hydrateStoredPastWeeks(id);
+        }
+
         if (!force && isPastWeek && cached?.byDate) {
             return { id, cacheKey, from: "ls-past" };
         }
@@ -289,20 +361,21 @@ export default function App() {
         //    - будущие/прошлые (кроме случая 3) → только RAM (без LS)
         const p = (async () => {
             try {
-                const fresh = await fetchWeekFromApi(id, weekStartDate);
+                const fresh = await fetchWeekFromApi(id, normalizedWeekStart);
 
                 const prevHash = stableByDateString(cached?.byDate || {});
                 const newHash  = stableByDateString(fresh.byDate || {});
 
-                if (newHash !== prevHash) {
+                const changed = newHash !== prevHash;
+                if (changed || !cached?.byDate) {
                     // если надо применить к текущему экрану — обновим
                     if (applyToView) {
                         setByDate(fresh.byDate);
                     }
-                    // пишем в LS только текущую реальную неделю
-                    if (isCurrentWeek) {
-                        lsSet(cacheKey, fresh);
-                    }
+                }
+                // текущую реальную неделю всегда сохраняем после успешного ответа API
+                if (isCurrentWeek) {
+                    lsSet(cacheKey, fresh);
                 }
 
                 // всегда держим в RAM-кэше актуальную версию
@@ -312,11 +385,11 @@ export default function App() {
                 // 6) предзагрузка одной "недели назад" в RAM,
                 //    но только когда грузим текущую реальную неделю
                 if (isCurrentWeek) {
-                    const prevStart = addDays(weekStartDate, -7);
+                    const prevStart = addDays(normalizedWeekStart, -7);
                     const prevKey = `${id}::${weekKeyOf(prevStart)}`;
 
                     // если прошлой недели нет в LS и она ещё не в RAM/не грузится — предзагрузим в RAM
-                    const prevInLs = lsPeek(prevKey);
+                    const prevInLs = readStoredWeek(prevKey, prevStart);
                     if (!prevInLs && !weekCacheRef.current.get(prevKey) && !inflightRef.current.get(prevKey)) {
                         const prevPromise = (async () => {
                             try {
@@ -334,7 +407,7 @@ export default function App() {
                 }
 
                 // предзагрузка одной "недели вперёд" в RAM (для быстрого листания)
-                const nextStart = addDays(weekStartDate, 7);
+                const nextStart = addDays(normalizedWeekStart, 7);
                 const nextKey = `${id}::${weekKeyOf(nextStart)}`;
 
                 if (!weekCacheRef.current.get(nextKey) && !inflightRef.current.get(nextKey)) {
@@ -450,9 +523,9 @@ export default function App() {
         }
 
         // нет в RAM — пробуем LocalStorage (могло быть сохранено ранее)
-        const pack = lsPeek(wkKey);
-        const cachedValue = pack?.v ?? (pack && pack.byDate ? pack : null);
+        const cachedValue = readStoredWeek(wkKey, d);
         if (cachedValue?.byDate) {
+            weekCacheRef.current.set(wkKey, { data: cachedValue, savedAt: Date.now() });
             const v = cachedValue.byDate[kDash] ?? cachedValue.byDate[kDot];
             return v === undefined ? undefined : v;
         }
