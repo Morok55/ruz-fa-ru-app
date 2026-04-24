@@ -1,5 +1,7 @@
 import React from "react";
 import LessonModal from "./LessonModal";
+import { FaCircleNotch } from "react-icons/fa";
+import { FiAlertTriangle } from "react-icons/fi";
 
 function fmtDateHeader(d) {
     return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
@@ -12,7 +14,7 @@ function isoKey(d) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
 }
 
-export default function DaySection({ date, lessons, loading = false, nowMinutes = null }) {
+export default function DaySection({ date, lessons, loading = false, apiRefreshing = false, apiFailed = false, nowMinutes = null }) {
     const [activeLesson, setActiveLesson] = React.useState(null);
 
     function parseHMToMinutes(str) {
@@ -35,9 +37,37 @@ export default function DaySection({ date, lessons, loading = false, nowMinutes 
         setActiveLesson(null);
     };
 
+    const showStatusInfo = (message) => {
+        const tg = window.Telegram?.WebApp;
+        if (typeof tg?.showAlert === "function") {
+            tg.showAlert(message);
+            return;
+        }
+        window.alert(message);
+    };
+
     return (
         <section className="day-section" data-day={key}>
             <div className="date-title">{fmtDateHeader(date)}</div>
+            {apiRefreshing ? (
+                <button
+                    type="button"
+                    className="day-api-status day-api-spinner"
+                    aria-label="Обновляем расписание"
+                    onClick={() => showStatusInfo("Расписание обновляется из ruz.fa.ru. Сейчас показаны сохраненные данные.")}
+                >
+                    <FaCircleNotch />
+                </button>
+            ) : apiFailed ? (
+                <button
+                    type="button"
+                    className="day-api-status day-api-error"
+                    aria-label="Не удалось обновить расписание"
+                    onClick={() => showStatusInfo("Не удалось обновить расписание из ruz.fa.ru. Показаны сохраненные данные.")}
+                >
+                    <FiAlertTriangle />
+                </button>
+            ) : null}
 
             {(loading && (!lessons || lessons.length === 0)) ? (
                 <div className="status loading-dots" aria-label="Загружаю" aria-live="polite">

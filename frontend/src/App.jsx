@@ -197,13 +197,6 @@ async function fetchWeekFromApi(id, weekStartDate) {
     return { byDate: tmp, fetchedAt: Date.now() };
 }
 
-function stableByDateString(bd) {
-    // Стабильная строка для сравнения: сортируем ключи дней
-    const res = {};
-    Object.keys(bd || {}).sort().forEach(k => { res[k] = bd[k]; });
-    return JSON.stringify(res);
-}
-
 export default function App() {
     const [term, setTerm] = useState(() => localStorage.getItem("lastGroup") || "");
     const [loading, setLoading] = useState(false);
@@ -224,6 +217,8 @@ export default function App() {
     // ------ КЭШИ (память вкладки) ------
     const groupCacheRef = useRef(new Map());  // term -> { id, label }
     const weekCacheRef = useRef(new Map());   // cacheKey -> { byDate, fetchedAt }
+    const loadedWeekKeysRef = useRef(new Set());
+    const failedWeekKeysRef = useRef(new Set());
 
     const weekSwiperRef = useRef(null);
 
@@ -285,6 +280,17 @@ export default function App() {
         return val;
     }
 
+    function markWeekLoaded(cacheKey) {
+        loadedWeekKeysRef.current.add(cacheKey);
+        failedWeekKeysRef.current.delete(cacheKey);
+        setCacheTick(t => t + 1);
+    }
+
+    function markWeekFailed(cacheKey) {
+        failedWeekKeysRef.current.add(cacheKey);
+        setCacheTick(t => t + 1);
+    }
+
     function hydrateStoredPastWeeks(id) {
         let hydrated = 0;
         try {
@@ -307,6 +313,7 @@ export default function App() {
                 .forEach(({ key, cached }) => {
                     if (!weekCacheRef.current.has(key)) {
                         weekCacheRef.current.set(key, { data: cached, savedAt: Date.now() });
+                        loadedWeekKeysRef.current.add(key);
                         hydrated += 1;
                     }
                 });
@@ -336,6 +343,7 @@ export default function App() {
         const cached = readStoredWeek(cacheKey, normalizedWeekStart);
         if (cached?.byDate) {
             weekCacheRef.current.set(cacheKey, { data: cached, savedAt: Date.now() });
+            markWeekLoaded(cacheKey);
             // Если надо применить к текущему экрану — рисуем немедленно
             if (applyToView) {
                 setByDate(cached.byDate);
@@ -359,19 +367,16 @@ export default function App() {
         // 5) грузим из API и раскладываем по политике:
         //    - текущая неделя → обновляем состояние и ПИШЕМ в LS
         //    - будущие/прошлые (кроме случая 3) → только RAM (без LS)
+        failedWeekKeysRef.current.delete(cacheKey);
+        setCacheTick(t => t + 1);
+
         const p = (async () => {
             try {
                 const fresh = await fetchWeekFromApi(id, normalizedWeekStart);
 
-                const prevHash = stableByDateString(cached?.byDate || {});
-                const newHash  = stableByDateString(fresh.byDate || {});
-
-                const changed = newHash !== prevHash;
-                if (changed || !cached?.byDate) {
-                    // если надо применить к текущему экрану — обновим
-                    if (applyToView) {
-                        setByDate(fresh.byDate);
-                    }
+                // если надо применить к текущему экрану — всегда берем свежий ответ API
+                if (applyToView) {
+                    setByDate(fresh.byDate);
                 }
                 // текущую реальную неделю всегда сохраняем после успешного ответа API
                 if (isCurrentWeek) {
@@ -380,7 +385,7 @@ export default function App() {
 
                 // всегда держим в RAM-кэше актуальную версию
                 weekCacheRef.current.set(cacheKey, { data: fresh, savedAt: Date.now() });
-                setCacheTick(t => t + 1);
+                markWeekLoaded(cacheKey);
 
                 // 6) предзагрузка одной "недели назад" в RAM,
                 //    но только когда грузим текущую реальную неделю
@@ -395,7 +400,7 @@ export default function App() {
                             try {
                                 const prevFresh = await fetchWeekFromApi(id, prevStart);
                                 weekCacheRef.current.set(prevKey, { data: prevFresh, savedAt: Date.now() });
-                                setCacheTick(t => t + 1);
+                                markWeekLoaded(prevKey);
                             } catch (e) {
                                 console.warn("Не удалось предзагрузить предыдущую неделю:", e);
                             } finally {
@@ -415,7 +420,7 @@ export default function App() {
                         try {
                             const nextFresh = await fetchWeekFromApi(id, nextStart);
                             weekCacheRef.current.set(nextKey, { data: nextFresh, savedAt: Date.now() });
-                            setCacheTick(t => t + 1);
+                            markWeekLoaded(nextKey);
                         } catch (e) {
                             console.warn("Не удалось предзагрузить следующую неделю:", e);
                         } finally {
@@ -426,6 +431,9 @@ export default function App() {
                 }
 
                 return { id, cacheKey, from: "network" };
+            } catch (e) {
+                markWeekFailed(cacheKey);
+                throw e;
             } finally {
                 inflightRef.current.delete(cacheKey);
                 setLoading(false);
@@ -503,6 +511,12 @@ export default function App() {
             startOfWeek(d).getTime() === startOfWeek(anchorDate).getTime();
         if (sameWeek) {
             const v = byDate?.[kDash] ?? byDate?.[kDot];
+            const group = groupCacheRef.current.get(term);
+            const id = group?.id;
+            const loadedKey = id ? `${id}::${weekKeyOf(d)}` : null;
+            if (v === undefined && loadedKey && loadedWeekKeysRef.current.has(loadedKey)) {
+                return [];
+            }
             // если день ещё не успел приехать — вернём undefined (покажет лоадер), а не []
             return v === undefined ? undefined : v;
         }
@@ -519,15 +533,16 @@ export default function App() {
         if (memValue?.byDate) {
             const v = memValue.byDate[kDash] ?? memValue.byDate[kDot];
             // если конкретный день ещё не подгружен — пусть будет undefined (покажет лоадер)
-            return v === undefined ? undefined : v;
+            return v === undefined ? [] : v;
         }
 
         // нет в RAM — пробуем LocalStorage (могло быть сохранено ранее)
         const cachedValue = readStoredWeek(wkKey, d);
         if (cachedValue?.byDate) {
             weekCacheRef.current.set(wkKey, { data: cachedValue, savedAt: Date.now() });
+            loadedWeekKeysRef.current.add(wkKey);
             const v = cachedValue.byDate[kDash] ?? cachedValue.byDate[kDot];
-            return v === undefined ? undefined : v;
+            return v === undefined ? [] : v;
         }
 
         // нигде нет — значит ещё грузится/будет грузиться
@@ -540,6 +555,14 @@ export default function App() {
         if (!id) return false;
         const wkKey = `${id}::${weekKeyOf(d)}`;
         return inflightRef.current.has(wkKey);
+    }, [term, cacheTick]);
+
+    const isApiFailedFor = React.useCallback((d) => {
+        const group = groupCacheRef.current.get(term);
+        const id = group?.id;
+        if (!id) return false;
+        const wkKey = `${id}::${weekKeyOf(d)}`;
+        return failedWeekKeysRef.current.has(wkKey);
     }, [term, cacheTick]);
 
     useEffect(() => {
@@ -634,18 +657,25 @@ export default function App() {
                 renderDay={(d) => {
                     const isToday = isSameDay(d, now);
                     const nowMinutes = isToday ? (now.getHours() * 60 + now.getMinutes()) : null;
+                    const lessons = getLessonsFor(d);
+                    const apiRefreshing = isLoadingFor(d) && lessons !== undefined;
+                    const apiFailed = !apiRefreshing && isApiFailedFor(d) && lessons !== undefined;
 
                     return (
                         <DaySection
                             date={d}
-                            lessons={getLessonsFor(d)}
+                            lessons={lessons}
                             // лоадер показываем, когда:
                             // 1) идёт загрузка текущей (якорной) недели — глобальный loading === true;
                             // 2) идёт точечная загрузка нужной недели (inflightRef) — isLoadingFor(d) === true.
                             loading={
-                                (loading && startOfWeek(d).getTime() === startOfWeek(anchorDate).getTime())
-                                || isLoadingFor(d)
+                                lessons === undefined && (
+                                    (loading && startOfWeek(d).getTime() === startOfWeek(anchorDate).getTime())
+                                    || isLoadingFor(d)
+                                )
                             }
+                            apiRefreshing={apiRefreshing}
+                            apiFailed={apiFailed}
                             nowMinutes={nowMinutes}
                         />
                     );
