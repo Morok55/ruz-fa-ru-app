@@ -1,12 +1,14 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import { FaCopy, FaCheck } from "react-icons/fa6";
+import { MdPerson } from "react-icons/md";
 
-export default function LessonModal({ lesson, onClose }) {
+export default function LessonModal({ lesson, onClose, onOpenTeacherSchedule }) {
     const [isSheetOpen, setIsSheetOpen] = React.useState(false);
     const [isSheetClosing, setIsSheetClosing] = React.useState(false);
 
     const [copiedEmail, setCopiedEmail] = React.useState("");
+    const [openingSchedule, setOpeningSchedule] = React.useState("");
 
     const closeTimerRef = React.useRef(null);
     const copyTimerRef = React.useRef(null);
@@ -26,6 +28,7 @@ export default function LessonModal({ lesson, onClose }) {
         if (hasLesson) {
             setIsSheetClosing(false);
             setCopiedEmail("");
+            setOpeningSchedule("");
             setDragOffset(0);
             setIsDragging(false);
             if (copyTimerRef.current) {
@@ -37,6 +40,7 @@ export default function LessonModal({ lesson, onClose }) {
             setIsSheetOpen(false);
             setIsSheetClosing(false);
             setCopiedEmail("");
+            setOpeningSchedule("");
             setDragOffset(0);
             setIsDragging(false);
         }
@@ -49,6 +53,15 @@ export default function LessonModal({ lesson, onClose }) {
             if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
         };
     }, []);
+
+    const showError = (message) => {
+        const tg = window.Telegram?.WebApp;
+        if (typeof tg?.showAlert === "function") {
+            tg.showAlert(message);
+            return;
+        }
+        window.alert(message);
+    };
 
     const startClose = () => {
         if (!hasLesson || isSheetClosing) return;
@@ -92,6 +105,21 @@ export default function LessonModal({ lesson, onClose }) {
             setCopiedEmail("");
             copyTimerRef.current = null;
         }, 2000);
+    };
+
+    const handleOpenTeacherSchedule = async (name) => {
+        const teacherName = String(name || "").trim();
+        if (!teacherName || typeof onOpenTeacherSchedule !== "function") return;
+
+        try {
+            setOpeningSchedule(teacherName);
+            await onOpenTeacherSchedule(teacherName);
+            startClose();
+        } catch (e) {
+            showError(e?.message || "Не удалось открыть расписание преподавателя");
+        } finally {
+            setOpeningSchedule("");
+        }
     };
 
     // TOUCH-обработчики для свайпа вниз
@@ -180,6 +208,8 @@ export default function LessonModal({ lesson, onClose }) {
             });
         }
 
+        const singleTeacherName = teachers.length === 1 ? teachers[0].name : "";
+
         return createPortal(
             <div className={overlayClass} onClick={startClose}>
                 <div
@@ -233,6 +263,17 @@ export default function LessonModal({ lesson, onClose }) {
                                 })
                             )}
                         </div>
+                        {singleTeacherName && (
+                            <button
+                                type="button"
+                                className="sheet-btn"
+                                onClick={() => handleOpenTeacherSchedule(singleTeacherName)}
+                                disabled={openingSchedule === singleTeacherName}
+                            >
+                                <MdPerson />
+                                <span>{openingSchedule === singleTeacherName ? "Открываем..." : "Перейти к расписанию"}</span>
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>,
@@ -245,6 +286,7 @@ export default function LessonModal({ lesson, onClose }) {
     const email = (lesson.lecturerEmail || lesson.lecturer_email || "").trim();
     const isCopiedMain = !!email && email === copiedEmail;
     const MainIcon = isCopiedMain ? FaCheck : FaCopy;
+    const canOpenSchedule = name && name !== "Преподаватель" && typeof onOpenTeacherSchedule === "function";
 
     return createPortal(
         <div className={overlayClass} onClick={startClose}>
@@ -264,15 +306,31 @@ export default function LessonModal({ lesson, onClose }) {
                         {email || "Почта не указана"}
                     </div>
 
-                    {email && (
-                        <button
-                            type="button"
-                            className="sheet-btn"
-                            onClick={() => handleCopyEmail(email)}
-                        >
-                            <MainIcon />
-                            <span>{isCopiedMain ? "Почта скопирована" : "Скопировать почту"}</span>
-                        </button>
+                    {(email || canOpenSchedule) && (
+                        <div className="teacher-sheet-actions">
+                            {email && (
+                                <button
+                                    type="button"
+                                    className="sheet-btn"
+                                    onClick={() => handleCopyEmail(email)}
+                                >
+                                    <MainIcon />
+                                    <span>{isCopiedMain ? "Почта скопирована" : "Скопировать почту"}</span>
+                                </button>
+                            )}
+
+                            {canOpenSchedule && (
+                                <button
+                                    type="button"
+                                    className="sheet-btn"
+                                    onClick={() => handleOpenTeacherSchedule(name)}
+                                    disabled={openingSchedule === name}
+                                >
+                                    <MdPerson />
+                                    <span>{openingSchedule === name ? "Открываем..." : "Перейти к расписанию"}</span>
+                                </button>
+                            )}
+                        </div>
                     )}
                 </div>
             </div>

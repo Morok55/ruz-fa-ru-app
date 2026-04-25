@@ -78,6 +78,62 @@ function getVisibleWeekKey(date) {
 const CURRENT_WEEK_START = startOfWeek(new Date());
 const CURRENT_WEEK_KEY = weekKeyOf(CURRENT_WEEK_START);
 const CURRENT_WEEK_TIME = CURRENT_WEEK_START.getTime();
+const LAST_ENTITY_KEY = "tg-schedule::last-entity";
+
+function normalizeEntity(raw, fallbackType = "group") {
+    if (!raw) return null;
+    const type = raw.type === "person" ? "person" : fallbackType;
+    const id = raw.id ?? raw.groupOid ?? raw.oid;
+    const label = raw.label || raw.text || raw.number || "";
+    if (!id || !label) return null;
+    return {
+        id,
+        label,
+        type,
+        description: raw.description || ""
+    };
+}
+
+function entityKey(entity) {
+    return entity ? `${entity.type || "group"}:${entity.id}` : "";
+}
+
+function scheduleCacheKey(entity, weekKey) {
+    return `${entityKey(entity)}::${weekKey}`;
+}
+
+function legacyGroupScheduleCacheKey(entity, weekKey) {
+    return entity?.type === "group" ? `${entity.id}::${weekKey}` : null;
+}
+
+function readLastEntity() {
+    try {
+        const raw = localStorage.getItem(LAST_ENTITY_KEY);
+        const parsed = raw ? normalizeEntity(JSON.parse(raw)) : null;
+        if (parsed) return parsed;
+    } catch {
+        // fall through to legacy keys
+    }
+
+    const lbl = localStorage.getItem("lastGroup");
+    const idRaw = localStorage.getItem("lastGroupId");
+    if (!lbl || !idRaw) return null;
+    const id = isNaN(Number(idRaw)) ? idRaw : Number(idRaw);
+    return normalizeEntity({ id, label: lbl, type: "group" });
+}
+
+function writeLastEntity(entity) {
+    try {
+        localStorage.setItem(LAST_ENTITY_KEY, JSON.stringify(entity));
+        // Legacy keys keep older builds and already-saved users on the happy path.
+        if (entity.type === "group") {
+            localStorage.setItem("lastGroup", entity.label);
+            localStorage.setItem("lastGroupId", String(entity.id));
+        }
+    } catch (e) {
+        console.warn("Could not write selected schedule to localStorage:", e);
+    }
+}
 
 function lsSet(key, value) {
     try {
@@ -107,7 +163,24 @@ function readStoredWeek(cacheKey, weekStartDate) {
     return cached?.byDate ? cached : null;
 }
 
-function mergeDayLessons(arr) {
+function readStoredWeekForEntity(entity, weekKey, weekStartDate) {
+    if (entity?.type === "person") {
+        return { cached: null, key: scheduleCacheKey(entity, weekKey) };
+    }
+
+    const primary = scheduleCacheKey(entity, weekKey);
+    const cached = readStoredWeek(primary, weekStartDate);
+    if (cached?.byDate) return { cached, key: primary };
+
+    const legacy = legacyGroupScheduleCacheKey(entity, weekKey);
+    if (legacy) {
+        const legacyCached = readStoredWeek(legacy, weekStartDate);
+        if (legacyCached?.byDate) return { cached: legacyCached, key: legacy };
+    }
+    return { cached: null, key: primary };
+}
+
+function mergeDayLessons(arr, scheduleType = "group") {
     const byKey = new Map();
     for (const l of arr) {
         const kind = (l.kindOfWork || l.lessonType || "").trim();
@@ -123,7 +196,9 @@ function mergeDayLessons(arr) {
         }
         const item = byKey.get(key);
 
-        const teacher = (l.lecturer_title || l.lecturer_name || "").trim();
+        const teacher = scheduleType === "person"
+            ? (l.group || l.groupName || l.subGroup || l.stream || "").trim()
+            : (l.lecturer_title || l.lecturer_name || "").trim();
         const room = (l.auditorium || l.room || "").trim();
 
         // добавляем уникальные комбинации teacher+room
@@ -181,27 +256,30 @@ async function fetchJSON(url) {
     return r.json();
 }
 
-async function fetchWeekFromApi(id, weekStartDate) {
+async function fetchWeekFromApi(entity, weekStartDate) {
     const start = fmtRuz(weekStartDate);
     const finish = fmtRuz(addDays(weekStartDate, 6));
-    const lessons = await fetchJSON(`${API_BASE}/schedule/group/${id}?start=${start}&finish=${finish}&lng=1`);
+    const scheduleType = entity.type === "person" ? "person" : "group";
+    const lessonsRaw = await fetchJSON(`${API_BASE}/schedule/${scheduleType}/${entity.id}?start=${start}&finish=${finish}&lng=1`);
+    const lessons = Array.isArray(lessonsRaw) ? lessonsRaw : (lessonsRaw?.value || []);
 
     const tmp = {};
     for (const l of lessons) {
         const d = parseRuzDate(l.date);
         if (!d) continue;
         const key = isoKey(d);
-        (tmp[key] ||= []).push(l);
+        (tmp[key] ||= []).push({ ...l, _scheduleType: scheduleType });
     }
-    Object.keys(tmp).forEach((k) => (tmp[k] = mergeDayLessons(tmp[k])));
+    Object.keys(tmp).forEach((k) => (tmp[k] = mergeDayLessons(tmp[k], scheduleType)));
     return { byDate: tmp, fetchedAt: Date.now() };
 }
 
 export default function App() {
-    const [term, setTerm] = useState(() => localStorage.getItem("lastGroup") || "");
+    const initialEntity = readLastEntity();
+    const [term, setTerm] = useState(() => entityKey(initialEntity));
     const [loading, setLoading] = useState(false);
     const [byDate, setByDate] = useState({});        // { "YYYY-MM-DD": Lesson[] }
-    const [label, setLabel] = useState("");
+    const [label, setLabel] = useState(() => initialEntity?.label || "");
     const [now, setNow] = useState(() => new Date());
     // триггер для перерисовки, когда обновляем RAM-кэш недель
     const [cacheTick, setCacheTick] = useState(0);
@@ -215,7 +293,7 @@ export default function App() {
     const [searchOpen, setSearchOpen] = useState(false);
 
     // ------ КЭШИ (память вкладки) ------
-    const groupCacheRef = useRef(new Map());  // term -> { id, label }
+    const groupCacheRef = useRef(new Map([[entityKey(initialEntity), initialEntity]].filter(([, v]) => !!v)));  // entityKey -> { id, label, type }
     const weekCacheRef = useRef(new Map());   // cacheKey -> { byDate, fetchedAt }
     const loadedWeekKeysRef = useRef(new Set());
     const failedWeekKeysRef = useRef(new Set());
@@ -244,11 +322,10 @@ export default function App() {
     }, []);
 
     useEffect(() => {
-        const lbl = localStorage.getItem("lastGroup");
-        const idRaw = localStorage.getItem("lastGroupId");
-        if (lbl && idRaw && !groupCacheRef.current.has(lbl)) {
-            const id = isNaN(Number(idRaw)) ? idRaw : Number(idRaw);
-            groupCacheRef.current.set(lbl, { id, label: lbl });
+        const stored = readLastEntity();
+        const key = entityKey(stored);
+        if (stored && key && !groupCacheRef.current.has(key)) {
+            groupCacheRef.current.set(key, stored);
         }
     }, []);
 
@@ -262,21 +339,19 @@ export default function App() {
     async function resolveGroupCached(termStr) {
         const hit = groupCacheRef.current.get(termStr);
         if (hit) return hit;
-        const lastLabel = localStorage.getItem("lastGroup");
-        const lastIdRaw = localStorage.getItem("lastGroupId");
-        if (lastLabel === termStr && lastIdRaw) {
-            const id = isNaN(Number(lastIdRaw)) ? lastIdRaw : Number(lastIdRaw);
-            const val = { id, label: lastLabel };
-            groupCacheRef.current.set(termStr, val);
+
+        const stored = readLastEntity();
+        if (stored && (entityKey(stored) === termStr || stored.label === termStr)) {
+            const val = normalizeEntity(stored);
+            groupCacheRef.current.set(entityKey(val), val);
             return val;
         }
+
         const options = await fetchJSON(`${API_BASE}/search?term=${encodeURIComponent(termStr)}`);
-        const group = options.find((v) => /group/i.test(v.type || v.kind || v.category || "") || v.group);
-        if (!group) throw new Error("Группа не найдена");
-        const id = group.id ?? group.groupOid ?? group.oid;
-        const lbl = group.label || group.text || termStr;
-        const val = { id, label: lbl };
-        groupCacheRef.current.set(termStr, val);
+        const picked = options.find((v) => v.type === "group" || v.type === "person") || options[0];
+        const val = normalizeEntity(picked);
+        if (!val) throw new Error("Расписание не найдено");
+        groupCacheRef.current.set(entityKey(val), val);
         return val;
     }
 
@@ -291,14 +366,18 @@ export default function App() {
         setCacheTick(t => t + 1);
     }
 
-    function hydrateStoredPastWeeks(id) {
+    function hydrateStoredPastWeeks(entity) {
         let hydrated = 0;
         try {
-            const prefix = `${id}::`;
+            const prefixes = [scheduleCacheKey(entity, "")];
+            const legacyPrefix = legacyGroupScheduleCacheKey(entity, "");
+            if (legacyPrefix) prefixes.push(legacyPrefix);
+
             const entries = [];
             for (let i = 0; i < localStorage.length; i += 1) {
                 const key = localStorage.key(i);
-                if (!key?.startsWith(prefix)) continue;
+                const prefix = prefixes.find((p) => key?.startsWith(p));
+                if (!prefix) continue;
 
                 const weekKey = key.slice(prefix.length);
                 const weekStart = parseWeekKey(weekKey);
@@ -325,24 +404,30 @@ export default function App() {
         return hydrated;
     }
 
-    async function loadWeekCached({ force = false, weekStartDate = anchorDate, applyToView = false, termOverride = null } = {}) {
-        // // 1) узнаём id группы (используем override, если передан)
+    async function loadWeekCached({ force = false, weekStartDate = anchorDate, applyToView = false, termOverride = null, entityOverride = null } = {}) {
+        // // 1) узнаём выбранную сущность расписания (группа или преподаватель)
         const termKey = termOverride ?? term;
-        if (!termKey) return;
-        const { id, label: lbl } = await resolveGroupCached(termKey);
-        setLabel(lbl);
+        if (!entityOverride && !termKey) return;
+        const entity = entityOverride ? normalizeEntity(entityOverride) : await resolveGroupCached(termKey);
+        if (!entity) return;
+        const entityCacheKey = entityKey(entity);
+        groupCacheRef.current.set(entityCacheKey, entity);
+        setLabel(entity.label);
 
         const normalizedWeekStart = startOfWeek(weekStartDate);
         const wkKey = weekKeyOf(normalizedWeekStart);
-        const cacheKey = `${id}::${wkKey}`;
+        const cacheKey = scheduleCacheKey(entity, wkKey);
 
         const isCurrentWeek = wkKey === CURRENT_WEEK_KEY;
         const isPastWeek = normalizedWeekStart.getTime() < CURRENT_WEEK_TIME;
 
         // 2) читаем из LocalStorage и сразу показываем, если есть
-        const cached = readStoredWeek(cacheKey, normalizedWeekStart);
+        const { cached, key: storedKey } = readStoredWeekForEntity(entity, wkKey, normalizedWeekStart);
         if (cached?.byDate) {
-            weekCacheRef.current.set(cacheKey, { data: cached, savedAt: Date.now() });
+            weekCacheRef.current.set(storedKey, { data: cached, savedAt: Date.now() });
+            if (storedKey !== cacheKey) {
+                weekCacheRef.current.set(cacheKey, { data: cached, savedAt: Date.now() });
+            }
             markWeekLoaded(cacheKey);
             // Если надо применить к текущему экрану — рисуем немедленно
             if (applyToView) {
@@ -352,11 +437,11 @@ export default function App() {
 
         // 3) политика "прошлые недели": если есть в LS и не force — ничего не запрашиваем
         if (isCurrentWeek) {
-            hydrateStoredPastWeeks(id);
+            hydrateStoredPastWeeks(entity);
         }
 
         if (!force && isPastWeek && cached?.byDate) {
-            return { id, cacheKey, from: "ls-past" };
+            return { id: entity.id, cacheKey, from: "ls-past" };
         }
 
         // 4) защита от параллельных запросов одной и той же недели
@@ -372,14 +457,14 @@ export default function App() {
 
         const p = (async () => {
             try {
-                const fresh = await fetchWeekFromApi(id, normalizedWeekStart);
+                const fresh = await fetchWeekFromApi(entity, normalizedWeekStart);
 
                 // если надо применить к текущему экрану — всегда берем свежий ответ API
                 if (applyToView) {
                     setByDate(fresh.byDate);
                 }
                 // текущую реальную неделю всегда сохраняем после успешного ответа API
-                if (isCurrentWeek) {
+                if (isCurrentWeek && entity.type !== "person") {
                     lsSet(cacheKey, fresh);
                 }
 
@@ -391,14 +476,15 @@ export default function App() {
                 //    но только когда грузим текущую реальную неделю
                 if (isCurrentWeek) {
                     const prevStart = addDays(normalizedWeekStart, -7);
-                    const prevKey = `${id}::${weekKeyOf(prevStart)}`;
+                    const prevWeekKey = weekKeyOf(prevStart);
+                    const prevKey = scheduleCacheKey(entity, prevWeekKey);
 
                     // если прошлой недели нет в LS и она ещё не в RAM/не грузится — предзагрузим в RAM
-                    const prevInLs = readStoredWeek(prevKey, prevStart);
+                    const prevInLs = readStoredWeekForEntity(entity, prevWeekKey, prevStart).cached;
                     if (!prevInLs && !weekCacheRef.current.get(prevKey) && !inflightRef.current.get(prevKey)) {
                         const prevPromise = (async () => {
                             try {
-                                const prevFresh = await fetchWeekFromApi(id, prevStart);
+                                const prevFresh = await fetchWeekFromApi(entity, prevStart);
                                 weekCacheRef.current.set(prevKey, { data: prevFresh, savedAt: Date.now() });
                                 markWeekLoaded(prevKey);
                             } catch (e) {
@@ -413,12 +499,12 @@ export default function App() {
 
                 // предзагрузка одной "недели вперёд" в RAM (для быстрого листания)
                 const nextStart = addDays(normalizedWeekStart, 7);
-                const nextKey = `${id}::${weekKeyOf(nextStart)}`;
+                const nextKey = scheduleCacheKey(entity, weekKeyOf(nextStart));
 
                 if (!weekCacheRef.current.get(nextKey) && !inflightRef.current.get(nextKey)) {
                     const nextPromise = (async () => {
                         try {
-                            const nextFresh = await fetchWeekFromApi(id, nextStart);
+                            const nextFresh = await fetchWeekFromApi(entity, nextStart);
                             weekCacheRef.current.set(nextKey, { data: nextFresh, savedAt: Date.now() });
                             markWeekLoaded(nextKey);
                         } catch (e) {
@@ -430,7 +516,7 @@ export default function App() {
                     inflightRef.current.set(nextKey, nextPromise);
                 }
 
-                return { id, cacheKey, from: "network" };
+                return { id: entity.id, cacheKey, from: "network" };
             } catch (e) {
                 markWeekFailed(cacheKey);
                 throw e;
@@ -498,6 +584,36 @@ export default function App() {
         }
     }
 
+    async function openTeacherScheduleByName(name) {
+        const teacherName = String(name || "").trim();
+        if (!teacherName) throw new Error("Не удалось определить преподавателя");
+
+        const options = await fetchJSON(`${API_BASE}/search?term=${encodeURIComponent(teacherName)}&type=person&limit=20`);
+        const exact = options.find((x) => String(x.label || "").trim().toLowerCase() === teacherName.toLowerCase());
+        const picked = exact || options[0];
+        const entity = normalizeEntity(picked, "person");
+        if (!entity || entity.type !== "person") {
+            throw new Error("Преподаватель не найден");
+        }
+
+        setByDate({});
+        setLabel(entity.label);
+        writeLastEntity(entity);
+
+        const key = entityKey(entity);
+        groupCacheRef.current.set(key, entity);
+        setTerm(key);
+
+        await loadWeekCached({
+            entityOverride: entity,
+            force: true,
+            weekStartDate: anchorDate,
+            applyToView: true
+        });
+
+        setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
+    }
+
     const getLessonsFor = React.useCallback((d) => {
         // ключи дня: YYYY-MM-DD и YYYY.MM.DD
         const y = d.getFullYear();
@@ -511,9 +627,8 @@ export default function App() {
             startOfWeek(d).getTime() === startOfWeek(anchorDate).getTime();
         if (sameWeek) {
             const v = byDate?.[kDash] ?? byDate?.[kDot];
-            const group = groupCacheRef.current.get(term);
-            const id = group?.id;
-            const loadedKey = id ? `${id}::${weekKeyOf(d)}` : null;
+            const entity = groupCacheRef.current.get(term);
+            const loadedKey = entity ? scheduleCacheKey(entity, weekKeyOf(d)) : null;
             if (v === undefined && loadedKey && loadedWeekKeysRef.current.has(loadedKey)) {
                 return [];
             }
@@ -522,11 +637,11 @@ export default function App() {
         }
 
         // иначе — ищем в RAM-кэше недели
-        const group = groupCacheRef.current.get(term);
-        const id = group?.id;
-        if (!id) return undefined;
+        const entity = groupCacheRef.current.get(term);
+        if (!entity) return undefined;
 
-        const wkKey = `${id}::${weekKeyOf(d)}`;
+        const weekKey = weekKeyOf(d);
+        const wkKey = scheduleCacheKey(entity, weekKey);
         const mem = weekCacheRef.current.get(wkKey);
         const memValue = mem?.data ?? mem; // на случай старого формата
 
@@ -537,9 +652,12 @@ export default function App() {
         }
 
         // нет в RAM — пробуем LocalStorage (могло быть сохранено ранее)
-        const cachedValue = readStoredWeek(wkKey, d);
+        const { cached: cachedValue, key: storedKey } = readStoredWeekForEntity(entity, weekKey, d);
         if (cachedValue?.byDate) {
             weekCacheRef.current.set(wkKey, { data: cachedValue, savedAt: Date.now() });
+            if (storedKey !== wkKey) {
+                weekCacheRef.current.set(storedKey, { data: cachedValue, savedAt: Date.now() });
+            }
             loadedWeekKeysRef.current.add(wkKey);
             const v = cachedValue.byDate[kDash] ?? cachedValue.byDate[kDot];
             return v === undefined ? [] : v;
@@ -550,18 +668,16 @@ export default function App() {
     }, [byDate, anchorDate, term, cacheTick]);
 
     const isLoadingFor = React.useCallback((d) => {
-        const group = groupCacheRef.current.get(term);
-        const id = group?.id;
-        if (!id) return false;
-        const wkKey = `${id}::${weekKeyOf(d)}`;
+        const entity = groupCacheRef.current.get(term);
+        if (!entity) return false;
+        const wkKey = scheduleCacheKey(entity, weekKeyOf(d));
         return inflightRef.current.has(wkKey);
     }, [term, cacheTick]);
 
     const isApiFailedFor = React.useCallback((d) => {
-        const group = groupCacheRef.current.get(term);
-        const id = group?.id;
-        if (!id) return false;
-        const wkKey = `${id}::${weekKeyOf(d)}`;
+        const entity = groupCacheRef.current.get(term);
+        if (!entity) return false;
+        const wkKey = scheduleCacheKey(entity, weekKeyOf(d));
         return failedWeekKeysRef.current.has(wkKey);
     }, [term, cacheTick]);
 
@@ -601,7 +717,7 @@ export default function App() {
                 <div className="group-search">
                     <FaSearch className="search-icon" />
                     <div className="input" style={{ cursor: "pointer" }}>
-                        {label || (term ? term : "Введите группу")}
+                        {label || "Введите группу или преподавателя"}
                     </div>
                 </div>
             </button>
@@ -625,20 +741,23 @@ export default function App() {
                 open={searchOpen}
                 onClose={() => setSearchOpen(false)}
                 onPick={async (g) => {
-                    // 1) оптимистично чистим экран от старой группы
+                    const entity = normalizeEntity(g);
+                    if (!entity) return;
+
+                    // 1) оптимистично чистим экран от старого расписания
                     setByDate({});
-                    setLabel(g.label);
+                    setLabel(entity.label);
 
                     // 2) фиксируем выбор
-                    localStorage.setItem("lastGroup", g.label);
-                    localStorage.setItem("lastGroupId", String(g.id));
+                    writeLastEntity(entity);
 
-                    groupCacheRef.current.set(g.label, { id: g.id, label: g.label }); // быстрый кэш
-                    setTerm(g.label);
+                    const key = entityKey(entity);
+                    groupCacheRef.current.set(key, entity); // быстрый кэш
+                    setTerm(key);
 
-                    // 3) СРАЗУ грузим неделю именно для выбранной группы
+                    // 3) СРАЗУ грузим неделю именно для выбранного расписания
                     await loadWeekCached({
-                        termOverride: g.label,
+                        entityOverride: entity,
                         force: true,
                         weekStartDate: anchorDate,
                         applyToView: true
@@ -665,6 +784,7 @@ export default function App() {
                         <DaySection
                             date={d}
                             lessons={lessons}
+                            onOpenTeacherSchedule={openTeacherScheduleByName}
                             // лоадер показываем, когда:
                             // 1) идёт загрузка текущей (якорной) недели — глобальный loading === true;
                             // 2) идёт точечная загрузка нужной недели (inflightRef) — isLoadingFor(d) === true.

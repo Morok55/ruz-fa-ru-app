@@ -1,15 +1,32 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { MdPeopleAlt, MdStar, MdStarBorder, MdClose } from "react-icons/md";
+import { MdPeopleAlt, MdPerson, MdStar, MdStarBorder, MdClose } from "react-icons/md";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
 const FAV_KEY = "tg-schedule::fav-groups";
 
+function normalizeItem(item, fallbackType = "group") {
+    const type = item?.type === "person" ? "person" : fallbackType;
+    return {
+        id: item?.id,
+        label: item?.label || "",
+        type,
+        description: item?.description || ""
+    };
+}
+
+function itemKey(item) {
+    const type = item?.type || "group";
+    return `${type}:${item?.id}`;
+}
+
 function favsRead() {
     try {
         const raw = localStorage.getItem(FAV_KEY);
         const arr = JSON.parse(raw || "[]");
-        return Array.isArray(arr) ? arr : [];
+        return Array.isArray(arr)
+            ? arr.map(x => normalizeItem(x)).filter(x => x.id && x.label)
+            : [];
     } catch { return []; }
 }
 function favsWrite(arr) {
@@ -17,7 +34,7 @@ function favsWrite(arr) {
 }
 function uniqById(list) {
     const seen = new Set();
-    return list.filter(g => !seen.has(g.id) && seen.add(g.id));
+    return list.filter(g => !seen.has(itemKey(g)) && seen.add(itemKey(g)));
 }
 
 export default function GroupSearch({ open, onClose, onPick }) {
@@ -31,31 +48,38 @@ export default function GroupSearch({ open, onClose, onPick }) {
     const [closing, setClosing] = useState(false); // идёт ли анимация закрытия
     const [active, setActive] = useState(false); // включает класс is-open через кадр
 
-    // избранные группы
+    // избранные расписания
     const [favs, setFavs] = useState(() => favsRead());
 
-    const isFav = useCallback((id) => favs.some(f => f.id === id), [favs]);
+    const isFav = useCallback((item) => favs.some(f => itemKey(f) === itemKey(item)), [favs]);
 
     const addFav = useCallback((g) => {
         setFavs(prev => {
-            const next = uniqById([{ id: g.id, label: g.label }, ...prev]);
+            const item = normalizeItem(g);
+            const next = uniqById([item, ...prev]);
             favsWrite(next);
             return next;
         });
     }, []);
 
-    const removeFav = useCallback((id) => {
+    const removeFav = useCallback((item) => {
         setFavs(prev => {
-            const next = prev.filter(f => f.id !== id);
+            const next = prev.filter(f => itemKey(f) !== itemKey(item));
             favsWrite(next);
             return next;
         });
     }, []);
 
     const toggleFav = useCallback((g) => {
-        if (isFav(g.id)) removeFav(g.id);
+        if (isFav(g)) removeFav(g);
         else addFav(g);
     }, [isFav, addFav, removeFav]);
+
+    const ItemIcon = ({ item, className }) => (
+        item?.type === "person"
+            ? <MdPerson className={className} />
+            : <MdPeopleAlt className={className} />
+    );
 
     const handleBack = useCallback(() => {
         onClose();
@@ -122,10 +146,16 @@ export default function GroupSearch({ open, onClose, onPick }) {
             }
             try {
                 setLoading(true);
-                const r = await fetch(`${API_BASE}/groups?term=${encodeURIComponent(term)}`, { signal: ctrl.signal });
-                if (!r.ok) throw new Error();
-                const data = await r.json();
-                setResults(data);
+                const [groupsRes, peopleRes] = await Promise.all([
+                    fetch(`${API_BASE}/groups?term=${encodeURIComponent(term)}`, { signal: ctrl.signal }),
+                    fetch(`${API_BASE}/search?term=${encodeURIComponent(term)}&type=person&limit=50`, { signal: ctrl.signal })
+                ]);
+                const groups = groupsRes.ok ? await groupsRes.json() : [];
+                const people = peopleRes.ok ? await peopleRes.json() : [];
+                setResults([
+                    ...groups.map(x => normalizeItem(x, "group")),
+                    ...people.map(x => normalizeItem(x, "person"))
+                ].filter(x => x.id && x.label));
             } catch (_) {
                 /* ignore */
             } finally {
@@ -156,7 +186,7 @@ export default function GroupSearch({ open, onClose, onPick }) {
                     <input
                         ref={inputRef}
                         className="gs-input"
-                        placeholder="Введите номер группы"
+                        placeholder="Группа или преподаватель"
                         value={q}
                         onChange={(e) => setQ(e.target.value)}
                     />
@@ -166,21 +196,21 @@ export default function GroupSearch({ open, onClose, onPick }) {
                 <div className="gs-section">Избранные</div>
                 <div className="gs-favs">
                     {favs.length === 0 ? (
-                        <div className="gs-empty">Здесь появятся избранные группы</div>
+                        <div className="gs-empty">Здесь появятся избранные расписания</div>
                     ) : (
                         favs.map(g => (
-                            <div className="gs-fav" key={g.id}>
+                            <div className="gs-fav" key={itemKey(g)}>
                                 <button
                                     className="gs-fav-chip"
                                     onClick={() => { onPick(g); onClose(); }}
                                     title={g.label}
                                 >
-                                    <MdPeopleAlt className="gs-fav-ico" />
+                                    <ItemIcon item={g} className="gs-fav-ico" />
                                     <span className="gs-fav-text">{g.label}</span>
                                 </button>
                                 <button
                                     className="gs-fav-del"
-                                    onClick={(e) => { e.stopPropagation(); removeFav(g.id); }}
+                                    onClick={(e) => { e.stopPropagation(); removeFav(g); }}
                                     aria-label="Удалить из избранного"
                                     title="Убрать"
                                 >
@@ -196,19 +226,22 @@ export default function GroupSearch({ open, onClose, onPick }) {
                     {loading ? (
                         <div className="gs-loading"><span></span><span></span><span></span></div>
                     ) : results.length === 0 ? (
-                        <div className="gs-empty">Начните вводить название группы</div>
+                        <div className="gs-empty">Начните вводить группу или фамилию преподавателя</div>
                     ) : (
                         results.map((g) => {
-                        const fav = isFav(g.id);
+                        const fav = isFav(g);
                         return (
-                            <div key={g.id} className="gs-item">
+                            <div key={itemKey(g)} className="gs-item">
                                 <button
                                     className="gs-item-main"
                                     onClick={() => { onPick(g); onClose(); }}
                                     title={g.label}
                                 >
-                                    <span className="gs-item-ico"><MdPeopleAlt /></span>
-                                    <span className="gs-item-text">{g.label}</span>
+                                    <span className="gs-item-ico"><ItemIcon item={g} /></span>
+                                    <span className="gs-item-copy">
+                                        <span className="gs-item-text">{g.label}</span>
+                                        {g.description ? <span className="gs-item-desc">{g.description.trim()}</span> : null}
+                                    </span>
                                 </button>
                                 <button
                                     className={"gs-item-star" + (fav ? " is-on" : "")}

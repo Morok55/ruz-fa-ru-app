@@ -564,6 +564,22 @@ body {
     white-space: nowrap;
 }
 
+.gs-item-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.gs-item-desc {
+    color: rgba(180, 180, 180, 0.72);
+    font-size: 12px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Кнопка «звезда» справа от карточки */
 .gs-item-star {
     flex: 0 0 auto;
@@ -896,6 +912,22 @@ body {
 
 .sheet-btn:active {
     opacity: 0.7;
+}
+
+.sheet-btn:disabled {
+    opacity: 0.65;
+    cursor: default;
+}
+
+.teacher-sheet-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.teacher-sheet-actions .sheet-btn {
+    margin-top: 0;
 }
 
 .teacher-sheet-body {

@@ -55,6 +55,42 @@ def cached_get(key: str, url: str):
     cache[key] = (data, 200)
     return data, 200
 
+def ruz_items(data):
+    """
+    RUZ иногда возвращает список напрямую, а иногда объект {"value": [...], "Count": N}.
+    Для фронта удобнее держать единый формат: list.
+    """
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and isinstance(data.get("value"), list):
+        return data["value"]
+    return []
+
+def normalize_search_items(data, fallback_type=None, limit=50):
+    result = []
+    seen = set()
+    for item in ruz_items(data):
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type") or fallback_type
+        item_id = item.get("id") or item.get("groupOid") or item.get("oid")
+        label = item.get("label") or item.get("text") or item.get("number") or ""
+        if not item_type or not item_id or not label:
+            continue
+        key = f"{item_type}:{item_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({
+            "id": item_id,
+            "label": label,
+            "type": item_type,
+            "description": item.get("description") or "",
+        })
+        if len(result) >= limit:
+            break
+    return result
+
 def load_groups_index():
     """
     Загружает backend/groups_index.json в память.
@@ -113,7 +149,7 @@ def groups_suggest():
             lbl = str(it.get("label") or "")
             gid = str(it.get("id") or "")
             if (lbl and term in lbl.lower()) or (is_digit and gid.startswith(term)):
-                result.append({"id": it.get("id"), "label": lbl})
+                result.append({"id": it.get("id"), "label": lbl, "type": "group"})
                 if len(result) >= limit:
                     break
 
@@ -126,14 +162,24 @@ def search():
     term = request.args.get("term", "").strip()
     if not term:
         return jsonify({"error": "term required"}), 400
-    q = urlencode({"term": term})
+    search_type = (request.args.get("type") or "").strip()
+    try:
+        limit = int(request.args.get("limit") or 50)
+    except ValueError:
+        limit = 50
+    limit = max(1, min(200, limit))
+
+    params = {"term": term}
+    if search_type:
+        params["type"] = search_type
+    q = urlencode(params)
     url = f"{RUZ_BASE}/api/search?{q}"
-    key = f"search:{term}"
+    key = f"search:{search_type}:{term}"
     data, status = cached_get(key, url)
     if status != 200:
         return jsonify({"error": f"RUZ search {status}"}), status
 
-    resp = make_response(jsonify(data), 200)
+    resp = make_response(jsonify(normalize_search_items(data, fallback_type=search_type, limit=limit)), 200)
     resp.headers["Cache-Control"] = "public, max-age=300"
     return resp
 
@@ -152,7 +198,26 @@ def schedule_group(group_id):
     if status != 200:
         return jsonify({"error": f"RUZ schedule {status}"}), status
 
-    resp = make_response(jsonify(data), 200)
+    resp = make_response(jsonify(ruz_items(data)), 200)
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+@app.get("/api/schedule/person/<person_id>")
+def schedule_person(person_id):
+    start = request.args.get("start")
+    finish = request.args.get("finish")
+    lng = request.args.get("lng", "1")
+    if not start or not finish:
+        return jsonify({"error": "start & finish required (YYYY.MM.DD)"}), 400
+
+    params = urlencode({"start": start, "finish": finish, "lng": lng})
+    url = f"{RUZ_BASE}/api/schedule/person/{person_id}?{params}"
+    key = f"person:{person_id}:{start}:{finish}:{lng}"
+    data, status = cached_get(key, url)
+    if status != 200:
+        return jsonify({"error": f"RUZ schedule {status}"}), status
+
+    resp = make_response(jsonify(ruz_items(data)), 200)
     resp.headers["Cache-Control"] = "public, max-age=300"
     return resp
 

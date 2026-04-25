@@ -14,7 +14,7 @@ function isoKey(d) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
 }
 
-export default function DaySection({ date, lessons, loading = false, apiRefreshing = false, apiFailed = false, nowMinutes = null }) {
+export default function DaySection({ date, lessons, loading = false, apiRefreshing = false, apiFailed = false, nowMinutes = null, onOpenTeacherSchedule }) {
     const [activeLesson, setActiveLesson] = React.useState(null);
 
     function parseHMToMinutes(str) {
@@ -169,7 +169,11 @@ export default function DaySection({ date, lessons, loading = false, apiRefreshi
             )}
 
             {/* Модалка в отдельном компоненте */}
-            <LessonModal lesson={activeLesson} onClose={closeLessonSheet} />
+            <LessonModal
+                lesson={activeLesson}
+                onClose={closeLessonSheet}
+                onOpenTeacherSchedule={onOpenTeacherSchedule}
+            />
         </section>
     );
 }
