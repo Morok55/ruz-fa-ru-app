@@ -472,7 +472,8 @@ body {
     border-radius: 10px;
     background: var(--card); 
     color: var(--text);
-    font-size: 14px;
+    /* iOS Safari/WebView приближает страницу при фокусе, если поле ввода меньше 16px. */
+    font-size: 16px;
 }
 
 .gs-input:focus {
