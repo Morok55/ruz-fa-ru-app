@@ -208,8 +208,6 @@ export default function LessonModal({ lesson, onClose, onOpenTeacherSchedule }) 
             });
         }
 
-        const singleTeacherName = teachers.length === 1 ? teachers[0].name : "";
-
         return createPortal(
             <div className={overlayClass} onClick={startClose}>
                 <div
@@ -249,31 +247,30 @@ export default function LessonModal({ lesson, onClose, onOpenTeacherSchedule }) 
                                                 </div>
                                             </div>
 
-                                            {hasEmail && (
+                                            <div className="teacher-row-actions">
+                                                {hasEmail && (
+                                                    <button
+                                                        type="button"
+                                                        className="teacher-copy-btn"
+                                                        onClick={() => handleCopyEmail(t.email)}
+                                                    >
+                                                        <Icon />
+                                                    </button>
+                                                )}
                                                 <button
                                                     type="button"
                                                     className="teacher-copy-btn"
-                                                    onClick={() => handleCopyEmail(t.email)}
+                                                    onClick={() => handleOpenTeacherSchedule(t.name)}
+                                                    disabled={openingSchedule === t.name}
                                                 >
-                                                    <Icon />
+                                                    <MdPerson />
                                                 </button>
-                                            )}
+                                            </div>
                                         </div>
                                     );
                                 })
                             )}
                         </div>
-                        {singleTeacherName && (
-                            <button
-                                type="button"
-                                className="sheet-btn"
-                                onClick={() => handleOpenTeacherSchedule(singleTeacherName)}
-                                disabled={openingSchedule === singleTeacherName}
-                            >
-                                <MdPerson />
-                                <span>{openingSchedule === singleTeacherName ? "Открываем..." : "Перейти к расписанию"}</span>
-                            </button>
-                        )}
                     </div>
                 </div>
             </div>,
