@@ -211,6 +211,64 @@ body {
     position: relative;
 }
 
+.return-schedule-btn {
+    position: fixed;
+    left: 50%;
+    bottom: max(18px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 45;
+
+    width: fit-content;
+    max-width: calc(100% - 32px);
+    min-height: 48px;
+    padding: 12px 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.22);
+    background: rgba(25,25,25,0.3);
+    color: var(--text);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.28);
+    backdrop-filter: blur(10px) saturate(1.45);
+    -webkit-backdrop-filter: blur(18px) saturate(1.45);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+
+    font: inherit;
+    font-size: 15px;
+    font-weight: 650;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    overflow: hidden;
+    transition:
+        opacity 140ms ease,
+        transform 140ms ease,
+        background-color 140ms ease,
+        border-color 140ms ease;
+}
+
+.return-schedule-btn svg {
+    flex: 0 0 auto;
+    color: var(--accent);
+    font-size: 20px;
+}
+
+.return-schedule-btn span {
+    min-width: 0;
+    max-width: min(72vw, 320px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.return-schedule-btn:active {
+    opacity: 0.82;
+    transform: translateX(-50%) translateY(2px) scale(0.98);
+    background: rgba(25,25,25,0.46);
+    border-color: rgba(255,255,255,0.3);
+}
+
 /* Сам swiper и враппер должны занять всю высоту области */
 .sections-swiper .swiper,
 .sections-swiper .swiper-wrapper {
@@ -848,6 +906,9 @@ body {
 .teacher-sheet {
     width: 100%;
     max-width: 720px;
+    max-height: 70vh;
+    max-height: min(70dvh, calc(100vh - 24px));
+    overflow-y: auto;
     background: var(--card);
     border-radius: 18px 18px 0 0;
     padding: 12px 18px 44px;
@@ -855,6 +916,10 @@ body {
 
     transform: translateY(100%);
     transition: transform 260ms cubic-bezier(.22,.61,.36,1);
+}
+
+.teacher-sheet::-webkit-scrollbar {
+    display: none;
 }
 
 .teacher-sheet-overlay.is-open .teacher-sheet {
@@ -878,6 +943,47 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
+}
+
+.lesson-sheet-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.lesson-sheet-kicker {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.lesson-sheet-title {
+    font-size: 18px;
+    font-weight: 650;
+    line-height: 1.25;
+}
+
+.lesson-sheet-meta {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.3;
+}
+
+.lesson-info-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.lesson-info-label {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
 }
 
 .teacher-sheet-name {
@@ -942,7 +1048,6 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    margin-top: 10px;
 }
 
 /* карточка преподавателя */

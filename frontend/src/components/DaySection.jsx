@@ -14,7 +14,7 @@ function isoKey(d) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
 }
 
-export default function DaySection({ date, lessons, loading = false, apiRefreshing = false, apiFailed = false, nowMinutes = null, onOpenTeacherSchedule }) {
+export default function DaySection({ date, lessons, loading = false, apiRefreshing = false, apiFailed = false, nowMinutes = null, onOpenTeacherSchedule, onOpenAuditoriumSchedule }) {
     const [activeLesson, setActiveLesson] = React.useState(null);
 
     function parseHMToMinutes(str) {
@@ -98,7 +98,7 @@ export default function DaySection({ date, lessons, loading = false, apiRefreshi
                         ? "СЕМИНАР"
                         : toPairUpper(kindRaw);
 
-                    const isForeign = l._isForeign ?? /иностран/i.test(l.discipline || "");
+                    const hasMultipleTeachers = l._hasMultipleTeachers === true;
 
                     let minsLeft = null;
                     let isCurrent = false;
@@ -128,7 +128,7 @@ export default function DaySection({ date, lessons, loading = false, apiRefreshi
                             <div className="subject">{l.discipline || "Дисциплина"}</div>
 
                             {Array.isArray(l._lines) && l._lines.length > 0 ? (
-                                (l._isForeign ?? /иностран/i.test(l.discipline || "")) ? (
+                                hasMultipleTeachers ? (
                                     l._lines.map(({ teacher, room }, i2) => (
                                         <div key={i2} className="subline">
                                             {[teacher, room].filter(Boolean).join(" — ")}
@@ -143,7 +143,7 @@ export default function DaySection({ date, lessons, loading = false, apiRefreshi
                                     ))
                                 )
                             ) : (
-                                (l._isForeign ?? /иностран/i.test(l.discipline || "")) ? (
+                                hasMultipleTeachers ? (
                                     <div className="subline">
                                         {[
                                             (l.lecturer_title || l.lecturer_name || "").trim(),
@@ -173,6 +173,7 @@ export default function DaySection({ date, lessons, loading = false, apiRefreshi
                 lesson={activeLesson}
                 onClose={closeLessonSheet}
                 onOpenTeacherSchedule={onOpenTeacherSchedule}
+                onOpenAuditoriumSchedule={onOpenAuditoriumSchedule}
             />
         </section>
     );

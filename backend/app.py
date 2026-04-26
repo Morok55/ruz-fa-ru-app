@@ -221,6 +221,25 @@ def schedule_person(person_id):
     resp.headers["Cache-Control"] = "public, max-age=300"
     return resp
 
+@app.get("/api/schedule/auditorium/<auditorium_id>")
+def schedule_auditorium(auditorium_id):
+    start = request.args.get("start")
+    finish = request.args.get("finish")
+    lng = request.args.get("lng", "1")
+    if not start or not finish:
+        return jsonify({"error": "start & finish required (YYYY.MM.DD)"}), 400
+
+    params = urlencode({"start": start, "finish": finish, "lng": lng})
+    url = f"{RUZ_BASE}/api/schedule/auditorium/{auditorium_id}?{params}"
+    key = f"auditorium:{auditorium_id}:{start}:{finish}:{lng}"
+    data, status = cached_get(key, url)
+    if status != 200:
+        return jsonify({"error": f"RUZ schedule {status}"}), status
+
+    resp = make_response(jsonify(ruz_items(data)), 200)
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
 # Папка со статикой после билда фронтенда
 app.static_folder = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 app.static_url_path = ""

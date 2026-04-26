@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { MdPeopleAlt, MdPerson, MdStar, MdStarBorder, MdClose } from "react-icons/md";
+import { MdMeetingRoom, MdPeopleAlt, MdPerson, MdStar, MdStarBorder, MdClose } from "react-icons/md";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
 const FAV_KEY = "tg-schedule::fav-groups";
 
 function normalizeItem(item, fallbackType = "group") {
-    const type = item?.type === "person" ? "person" : fallbackType;
+    const type = item?.type === "person" || item?.type === "auditorium" ? item.type : fallbackType;
     return {
         id: item?.id,
         label: item?.label || "",
@@ -76,9 +76,9 @@ export default function GroupSearch({ open, onClose, onPick }) {
     }, [isFav, addFav, removeFav]);
 
     const ItemIcon = ({ item, className }) => (
-        item?.type === "person"
-            ? <MdPerson className={className} />
-            : <MdPeopleAlt className={className} />
+        item?.type === "person" ? <MdPerson className={className} />
+            : item?.type === "auditorium" ? <MdMeetingRoom className={className} />
+                : <MdPeopleAlt className={className} />
     );
 
     const handleBack = useCallback(() => {
@@ -146,15 +146,18 @@ export default function GroupSearch({ open, onClose, onPick }) {
             }
             try {
                 setLoading(true);
-                const [groupsRes, peopleRes] = await Promise.all([
+                const [groupsRes, peopleRes, roomsRes] = await Promise.all([
                     fetch(`${API_BASE}/groups?term=${encodeURIComponent(term)}`, { signal: ctrl.signal }),
-                    fetch(`${API_BASE}/search?term=${encodeURIComponent(term)}&type=person&limit=50`, { signal: ctrl.signal })
+                    fetch(`${API_BASE}/search?term=${encodeURIComponent(term)}&type=person&limit=50`, { signal: ctrl.signal }),
+                    fetch(`${API_BASE}/search?term=${encodeURIComponent(term)}&type=auditorium&limit=50`, { signal: ctrl.signal })
                 ]);
                 const groups = groupsRes.ok ? await groupsRes.json() : [];
                 const people = peopleRes.ok ? await peopleRes.json() : [];
+                const rooms = roomsRes.ok ? await roomsRes.json() : [];
                 setResults([
                     ...groups.map(x => normalizeItem(x, "group")),
-                    ...people.map(x => normalizeItem(x, "person"))
+                    ...people.map(x => normalizeItem(x, "person")),
+                    ...rooms.map(x => normalizeItem(x, "auditorium"))
                 ].filter(x => x.id && x.label));
             } catch (_) {
                 /* ignore */
@@ -186,7 +189,7 @@ export default function GroupSearch({ open, onClose, onPick }) {
                     <input
                         ref={inputRef}
                         className="gs-input"
-                        placeholder="Группа или преподаватель"
+                        placeholder="Группа, преподаватель или аудитория"
                         value={q}
                         onChange={(e) => setQ(e.target.value)}
                     />
@@ -226,7 +229,7 @@ export default function GroupSearch({ open, onClose, onPick }) {
                     {loading ? (
                         <div className="gs-loading"><span></span><span></span><span></span></div>
                     ) : results.length === 0 ? (
-                        <div className="gs-empty">Начните вводить группу или фамилию преподавателя</div>
+                        <div className="gs-empty">Начните вводить группу, преподавателя или аудиторию</div>
                     ) : (
                         results.map((g) => {
                         const fav = isFav(g);

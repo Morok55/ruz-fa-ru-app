@@ -5,6 +5,7 @@ import Sections from "./components/Sections.jsx";
 import DaySection from "./components/DaySection.jsx";
 import GroupSearch from "./components/GroupSearch.jsx";
 import { FaSearch } from "react-icons/fa";
+import { MdArrowBack } from "react-icons/md";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
@@ -82,7 +83,7 @@ const LAST_ENTITY_KEY = "tg-schedule::last-entity";
 
 function normalizeEntity(raw, fallbackType = "group") {
     if (!raw) return null;
-    const type = raw.type === "person" ? "person" : fallbackType;
+    const type = raw.type === "person" || raw.type === "auditorium" ? raw.type : fallbackType;
     const id = raw.id ?? raw.groupOid ?? raw.oid;
     const label = raw.label || raw.text || raw.number || "";
     if (!id || !label) return null;
@@ -99,11 +100,8 @@ function entityKey(entity) {
 }
 
 function scheduleCacheKey(entity, weekKey) {
+    if (entity?.type === "group") return `${entity.id}::${weekKey}`;
     return `${entityKey(entity)}::${weekKey}`;
-}
-
-function legacyGroupScheduleCacheKey(entity, weekKey) {
-    return entity?.type === "group" ? `${entity.id}::${weekKey}` : null;
 }
 
 function readLastEntity() {
@@ -164,19 +162,13 @@ function readStoredWeek(cacheKey, weekStartDate) {
 }
 
 function readStoredWeekForEntity(entity, weekKey, weekStartDate) {
-    if (entity?.type === "person") {
+    if (entity?.type !== "group") {
         return { cached: null, key: scheduleCacheKey(entity, weekKey) };
     }
 
     const primary = scheduleCacheKey(entity, weekKey);
     const cached = readStoredWeek(primary, weekStartDate);
     if (cached?.byDate) return { cached, key: primary };
-
-    const legacy = legacyGroupScheduleCacheKey(entity, weekKey);
-    if (legacy) {
-        const legacyCached = readStoredWeek(legacy, weekStartDate);
-        if (legacyCached?.byDate) return { cached: legacyCached, key: legacy };
-    }
     return { cached: null, key: primary };
 }
 
@@ -190,16 +182,18 @@ function mergeDayLessons(arr, scheduleType = "group") {
             byKey.set(key, {
                 ...l,
                 _lines: [],        // массив объектов { teacher, room }
-                _isForeign: /иностран/i.test(l.discipline || ""), // флаг «иностр. язык»
                 _originals: []
             });
         }
         const item = byKey.get(key);
 
+        const groupOrStream = (l.group || l.groupName || l.subGroup || l.stream || "").trim();
         const teacher = scheduleType === "person"
-            ? (l.group || l.groupName || l.subGroup || l.stream || "").trim()
+            ? groupOrStream
             : (l.lecturer_title || l.lecturer_name || "").trim();
-        const room = (l.auditorium || l.room || "").trim();
+        const room = scheduleType === "auditorium"
+            ? groupOrStream
+            : (l.auditorium || l.room || "").trim();
 
         // добавляем уникальные комбинации teacher+room
         if (teacher || room) {
@@ -216,7 +210,25 @@ function mergeDayLessons(arr, scheduleType = "group") {
 
     return merged.map((l, i) => {
         const no = pairNoByTime(l.beginLesson, l.endLesson);
-        return { ...l, _pairNo: no ?? (i + 1) };
+        const teacherNames = new Set(
+            (l._originals || [])
+                .map((x) => (x.lecturer_title || x.lecturer_name || "").trim())
+                .filter(Boolean)
+        );
+        const rooms = new Set(
+            (l._originals || [])
+                .map((x) => [
+                    (x.auditorium || x.room || "").trim(),
+                    (x.building || "").trim()
+                ].filter(Boolean).join("|"))
+                .filter(Boolean)
+        );
+        return {
+            ...l,
+            _pairNo: no ?? (i + 1),
+            _hasMultipleTeachers: teacherNames.size > 1,
+            _hasMultipleRooms: rooms.size > 1
+        };
     });
 }
 
@@ -259,7 +271,7 @@ async function fetchJSON(url) {
 async function fetchWeekFromApi(entity, weekStartDate) {
     const start = fmtRuz(weekStartDate);
     const finish = fmtRuz(addDays(weekStartDate, 6));
-    const scheduleType = entity.type === "person" ? "person" : "group";
+    const scheduleType = entity.type === "person" || entity.type === "auditorium" ? entity.type : "group";
     const lessonsRaw = await fetchJSON(`${API_BASE}/schedule/${scheduleType}/${entity.id}?start=${start}&finish=${finish}&lng=1`);
     const lessons = Array.isArray(lessonsRaw) ? lessonsRaw : (lessonsRaw?.value || []);
 
@@ -291,6 +303,7 @@ export default function App() {
     const [selectedDate, setSelectedDate] = useState(new Date());
 
     const [searchOpen, setSearchOpen] = useState(false);
+    const [returnTarget, setReturnTarget] = useState(null);
 
     // ------ КЭШИ (память вкладки) ------
     const groupCacheRef = useRef(new Map([[entityKey(initialEntity), initialEntity]].filter(([, v]) => !!v)));  // entityKey -> { id, label, type }
@@ -348,7 +361,7 @@ export default function App() {
         }
 
         const options = await fetchJSON(`${API_BASE}/search?term=${encodeURIComponent(termStr)}`);
-        const picked = options.find((v) => v.type === "group" || v.type === "person") || options[0];
+        const picked = options.find((v) => v.type === "group" || v.type === "person" || v.type === "auditorium") || options[0];
         const val = normalizeEntity(picked);
         if (!val) throw new Error("Расписание не найдено");
         groupCacheRef.current.set(entityKey(val), val);
@@ -367,11 +380,11 @@ export default function App() {
     }
 
     function hydrateStoredPastWeeks(entity) {
+        if (entity?.type !== "group") return 0;
+
         let hydrated = 0;
         try {
             const prefixes = [scheduleCacheKey(entity, "")];
-            const legacyPrefix = legacyGroupScheduleCacheKey(entity, "");
-            if (legacyPrefix) prefixes.push(legacyPrefix);
 
             const entries = [];
             for (let i = 0; i < localStorage.length; i += 1) {
@@ -464,7 +477,7 @@ export default function App() {
                     setByDate(fresh.byDate);
                 }
                 // текущую реальную неделю всегда сохраняем после успешного ответа API
-                if (isCurrentWeek && entity.type !== "person") {
+                if (isCurrentWeek && entity.type === "group") {
                     lsSet(cacheKey, fresh);
                 }
 
@@ -584,6 +597,36 @@ export default function App() {
         }
     }
 
+    async function switchToEntity(entity, { rememberReturn = false, clearReturn = false } = {}) {
+        const normalized = normalizeEntity(entity);
+        if (!normalized) return;
+
+        const currentEntity = groupCacheRef.current.get(term);
+        if (rememberReturn && currentEntity?.type === "group" && entityKey(currentEntity) !== entityKey(normalized)) {
+            setReturnTarget(currentEntity);
+        }
+        if (clearReturn) {
+            setReturnTarget(null);
+        }
+
+        setByDate({});
+        setLabel(normalized.label);
+        writeLastEntity(normalized);
+
+        const key = entityKey(normalized);
+        groupCacheRef.current.set(key, normalized);
+        setTerm(key);
+
+        await loadWeekCached({
+            entityOverride: normalized,
+            force: true,
+            weekStartDate: anchorDate,
+            applyToView: true
+        });
+
+        setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
+    }
+
     async function openTeacherScheduleByName(name) {
         const teacherName = String(name || "").trim();
         if (!teacherName) throw new Error("Не удалось определить преподавателя");
@@ -596,22 +639,41 @@ export default function App() {
             throw new Error("Преподаватель не найден");
         }
 
-        setByDate({});
-        setLabel(entity.label);
-        writeLastEntity(entity);
+        await switchToEntity(entity, { rememberReturn: true });
+    }
 
-        const key = entityKey(entity);
-        groupCacheRef.current.set(key, entity);
-        setTerm(key);
+    async function openAuditoriumSchedule(room) {
+        const roomLabel = String(room?.label || "").trim();
+        if (!roomLabel) throw new Error("Не удалось определить аудиторию");
 
-        await loadWeekCached({
-            entityOverride: entity,
-            force: true,
-            weekStartDate: anchorDate,
-            applyToView: true
-        });
+        const roomId = room?.id && String(room.id) !== "0" ? room.id : null;
+        let entity = roomId
+            ? normalizeEntity({
+                id: roomId,
+                label: roomLabel,
+                type: "auditorium",
+                description: room.description || ""
+            }, "auditorium")
+            : null;
 
-        setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
+        if (!entity) {
+            const options = await fetchJSON(`${API_BASE}/search?term=${encodeURIComponent(roomLabel)}&type=auditorium&limit=50`);
+            const building = String(room?.description || "").trim().toLowerCase();
+            const exactWithBuilding = options.find((x) =>
+                String(x.label || "").trim().toLowerCase() === roomLabel.toLowerCase()
+                && (!building || String(x.description || "").toLowerCase().includes(building))
+            );
+            const exact = options.find((x) =>
+                String(x.label || "").trim().toLowerCase() === roomLabel.toLowerCase()
+            );
+            entity = normalizeEntity(exactWithBuilding || exact || options[0], "auditorium");
+        }
+
+        if (!entity || entity.type !== "auditorium") {
+            throw new Error("Аудитория не найдена");
+        }
+
+        await switchToEntity(entity, { rememberReturn: true });
     }
 
     const getLessonsFor = React.useCallback((d) => {
@@ -717,7 +779,7 @@ export default function App() {
                 <div className="group-search">
                     <FaSearch className="search-icon" />
                     <div className="input" style={{ cursor: "pointer" }}>
-                        {label || "Введите группу или преподавателя"}
+                        {label || "Введите группу, преподавателя или аудиторию"}
                     </div>
                 </div>
             </button>
@@ -743,28 +805,7 @@ export default function App() {
                 onPick={async (g) => {
                     const entity = normalizeEntity(g);
                     if (!entity) return;
-
-                    // 1) оптимистично чистим экран от старого расписания
-                    setByDate({});
-                    setLabel(entity.label);
-
-                    // 2) фиксируем выбор
-                    writeLastEntity(entity);
-
-                    const key = entityKey(entity);
-                    groupCacheRef.current.set(key, entity); // быстрый кэш
-                    setTerm(key);
-
-                    // 3) СРАЗУ грузим неделю именно для выбранного расписания
-                    await loadWeekCached({
-                        entityOverride: entity,
-                        force: true,
-                        weekStartDate: anchorDate,
-                        applyToView: true
-                    });
-
-                    // 4) сохранить выбранный день в пределах той же позиции недели
-                    setSelectedDate(prev => sameWeekdayInWeek(anchorDate, prev));
+                    await switchToEntity(entity, { clearReturn: true });
                 }}
             />
             <Sections
@@ -785,6 +826,7 @@ export default function App() {
                             date={d}
                             lessons={lessons}
                             onOpenTeacherSchedule={openTeacherScheduleByName}
+                            onOpenAuditoriumSchedule={openAuditoriumSchedule}
                             // лоадер показываем, когда:
                             // 1) идёт загрузка текущей (якорной) недели — глобальный loading === true;
                             // 2) идёт точечная загрузка нужной недели (inflightRef) — isLoadingFor(d) === true.
@@ -806,6 +848,17 @@ export default function App() {
                 onPullDownRefresh={refreshCurrentWeek}
                 refreshing={loading}
             />
+            {returnTarget?.type === "group" && (
+                <button
+                    type="button"
+                    className="return-schedule-btn"
+                    onClick={() => switchToEntity(returnTarget, { clearReturn: true })}
+                    title={`Вернуться к ${returnTarget.label}`}
+                >
+                    <MdArrowBack />
+                    <span>Вернуться к {returnTarget.label}</span>
+                </button>
+            )}
         </AppShell>
     );
 }
