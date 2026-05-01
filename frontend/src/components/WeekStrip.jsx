@@ -124,13 +124,21 @@ export default function WeekStrip({
         };
 
         const end = (committed, dir) => {
+            if (!dragRef.current.active) return;
+
             const el = ghostRef.current;
             el?.classList.remove("no-tr");
 
             const grid = gridRef.current;
             const idx = weekDays.findIndex(d => d.toDateString() === selectedDate.toDateString());
             const from = dragRef.current.fromRect;
-            if (!grid || !from || idx < 0) { dragRef.current.active = false; return; }
+            if (!grid || !from || idx < 0) {
+                dragRef.current.active = false;
+                dragRef.current.fromRect = null;
+                dragRef.current.leftRect = null;
+                dragRef.current.rightRect = null;
+                return;
+            }
 
             // Определяем «краевой» кейс: вс→пн (next) или пн→вс (prev)
             const edgeNext = committed && dir === "next" && idx === 6;
@@ -141,6 +149,9 @@ export default function WeekStrip({
                 // свайп отменён — вернуться к исходной кнопке
                 applyGhost(from);
                 dragRef.current.active = false;
+                dragRef.current.fromRect = null;
+                dragRef.current.leftRect = null;
+                dragRef.current.rightRect = null;
                 dragRef.current.awaitingWeekSnap = false;
                 return;
             }
@@ -154,6 +165,9 @@ export default function WeekStrip({
                     el.style.opacity = "0";
                 }
                 dragRef.current.active = false;
+                dragRef.current.fromRect = null;
+                dragRef.current.leftRect = null;
+                dragRef.current.rightRect = null;
                 return;
             }
 
@@ -175,6 +189,9 @@ export default function WeekStrip({
 
             applyGhost(to);
             dragRef.current.active = false;
+            dragRef.current.fromRect = null;
+            dragRef.current.leftRect = null;
+            dragRef.current.rightRect = null;
             dragRef.current.awaitingWeekSnap = false;
 
             // по завершении transition сбросить флаги
